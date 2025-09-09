@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "dremio": {
+      "command": "python",
+      "args": ["/Users/neel/WebstormProjects/DremioMCP/dremio_mcp_server.py"],
+      "env": {
+        "DREMIO_HOST": "your-dremio-host.com",
+        "DREMIO_PORT": "9047",
+        "DREMIO_USERNAME": "your-username",
+        "DREMIO_PASSWORD": "your-password",
+        "DREMIO_USE_SSL": "true",
+        "OPENAI_API_KEY": "your-openai-api-key"
+      }
+    }
+  }
+}
