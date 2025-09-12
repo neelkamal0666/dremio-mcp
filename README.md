@@ -32,7 +32,7 @@ A comprehensive Model Context Protocol (MCP) server and AI agent for interacting
 
 - Python 3.8 or higher
 - Access to a Dremio instance
-- (Optional) OpenAI API key for enhanced AI features
+- (Optional) Anthropic API key for enhanced AI features
 
 ### Setup
 
@@ -60,7 +60,7 @@ A comprehensive Model Context Protocol (MCP) server and AI agent for interacting
    DREMIO_USE_SSL=true
    
    # Optional: For enhanced AI features
-   OPENAI_API_KEY=your-openai-api-key
+   ANTHROPIC_API_KEY=your-anthropic-api-key
    ```
 
 ## Usage
@@ -216,9 +216,9 @@ Get a sample of data from a table for exploration.
 
 2. **Restart Claude Desktop** and you'll have access to Dremio tools.
 
-### GPT Integration
+### Claude Integration
 
-For GPT integration, you can use the MCP server through the OpenAI API or run the interactive CLI.
+For Claude integration, you can use the MCP server through the Anthropic API or run the interactive CLI.
 
 ## Natural Language Query Examples
 
@@ -249,8 +249,8 @@ The AI agent can understand various types of queries:
 
 ### AI-Powered SQL Generation
 
-When OpenAI API key is configured, the agent can:
-- Convert complex natural language queries to SQL
+When Anthropic API key is configured, the agent can:
+- Convert complex natural language queries to SQL using Claude
 - Suggest query optimizations
 - Explain SQL queries in natural language
 - Provide data insights and analysis
@@ -283,7 +283,7 @@ Comprehensive error handling includes:
 | `DREMIO_USE_SSL` | Use SSL connection | true |
 | `DREMIO_CLIENT_ID` | OAuth client ID (optional) | - |
 | `DREMIO_CLIENT_SECRET` | OAuth client secret (optional) | - |
-| `OPENAI_API_KEY` | OpenAI API key (optional) | - |
+| `ANTHROPIC_API_KEY` | Anthropic API key (optional) | - |
 
 ### Authentication Methods
 
@@ -348,7 +348,17 @@ To add new MCP tools:
 
 ### Testing
 
-Run tests with:
+Run the main test suite:
+```bash
+python test_setup.py
+```
+
+Test Anthropic Claude integration specifically:
+```bash
+python test_anthropic.py
+```
+
+Run development tests with pytest:
 ```bash
 python -m pytest tests/
 ```

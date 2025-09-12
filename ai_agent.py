@@ -15,7 +15,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from openai import OpenAI
+from anthropic import Anthropic
 from dremio_client import DremioClient
 
 logger = logging.getLogger(__name__)
@@ -23,20 +23,20 @@ logger = logging.getLogger(__name__)
 class DremioAIAgent:
     """AI Agent for natural language interaction with Dremio data"""
     
-    def __init__(self, dremio_client: DremioClient, openai_api_key: Optional[str] = None):
+    def __init__(self, dremio_client: DremioClient, anthropic_api_key: Optional[str] = None):
         self.dremio_client = dremio_client
-        self.openai_client: Optional[OpenAI] = None
+        self.anthropic_client: Optional[Anthropic] = None
         
-        if openai_api_key:
-            self.openai_client = OpenAI(api_key=openai_api_key)
+        if anthropic_api_key:
+            self.anthropic_client = Anthropic(api_key=anthropic_api_key)
         
         # Cache for metadata to avoid repeated API calls
         self.metadata_cache = {}
         self.table_schemas = {}
         
-    def set_openai_key(self, api_key: str):
-        """Set OpenAI API key for enhanced natural language processing"""
-        self.openai_client = OpenAI(api_key=api_key)
+    def set_anthropic_key(self, api_key: str):
+        """Set Anthropic API key for enhanced natural language processing"""
+        self.anthropic_client = Anthropic(api_key=api_key)
     
     async def process_query(self, user_query: str) -> Dict[str, Any]:
         """Process a natural language query and return results"""
@@ -159,7 +159,7 @@ class DremioAIAgent:
         """Handle data-related queries"""
         try:
             # Generate SQL query using AI if available
-            if self.openai_client:
+            if self.anthropic_client:
                 sql_query = await self._generate_sql_with_ai(query, intent)
             else:
                 sql_query = self._generate_sql_heuristic(query, intent)
@@ -271,9 +271,9 @@ class DremioAIAgent:
             }
     
     async def _generate_sql_with_ai(self, query: str, intent: Dict[str, Any]) -> Optional[str]:
-        """Generate SQL query using OpenAI API (>=1.0 client)"""
+        """Generate SQL query using Anthropic Claude API"""
         try:
-            if not self.openai_client:
+            if not self.anthropic_client:
                 return None
             # Get available tables for context
             tables = self.dremio_client.list_tables()
@@ -289,16 +289,16 @@ class DremioAIAgent:
                 "include appropriate GROUP BY clauses. Return only the SQL query, no explanations."
             )
             
-            def _call_openai():
-                return self.openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": prompt}],
+            def _call_anthropic():
+                return self.anthropic_client.messages.create(
+                    model="claude-3-sonnet-20240229",
                     max_tokens=500,
                     temperature=0.1,
+                    messages=[{"role": "user", "content": prompt}]
                 )
             
-            response = await asyncio.to_thread(_call_openai)
-            sql_query = response.choices[0].message.content.strip()
+            response = await asyncio.to_thread(_call_anthropic)
+            sql_query = response.content[0].text.strip()
             sql_query = re.sub(r'^```sql\s*', '', sql_query)
             sql_query = re.sub(r'\s*```$', '', sql_query)
             return sql_query
@@ -357,8 +357,8 @@ class DremioAIAgent:
     
     async def explain_query(self, sql_query: str) -> str:
         """Explain what a SQL query does in natural language"""
-        if not self.openai_client:
-            return "AI explanation not available. Please set OpenAI API key."
+        if not self.anthropic_client:
+            return "AI explanation not available. Please set Anthropic API key."
         
         try:
             prompt = (
@@ -368,16 +368,16 @@ class DremioAIAgent:
                 "and any important details about the results."
             )
             
-            def _call_openai():
-                return self.openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": prompt}],
+            def _call_anthropic():
+                return self.anthropic_client.messages.create(
+                    model="claude-3-sonnet-20240229",
                     max_tokens=300,
                     temperature=0.3,
+                    messages=[{"role": "user", "content": prompt}]
                 )
             
-            response = await asyncio.to_thread(_call_openai)
-            return response.choices[0].message.content.strip()
+            response = await asyncio.to_thread(_call_anthropic)
+            return response.content[0].text.strip()
             
         except Exception as e:
             logger.error(f"Error explaining query: {str(e)}")

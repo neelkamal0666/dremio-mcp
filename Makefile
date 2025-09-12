@@ -18,6 +18,9 @@ setup: ## Run initial setup
 test: ## Run test suite
 	python test_setup.py
 
+test-anthropic: ## Test Anthropic Claude integration
+	python test_anthropic.py
+
 test-connection: ## Test Dremio connection
 	python cli.py test-connection
 

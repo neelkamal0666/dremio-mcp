@@ -54,7 +54,7 @@ def setup_environment():
     print("   - DREMIO_HOST: Your Dremio server hostname")
     print("   - DREMIO_USERNAME: Your Dremio username")
     print("   - DREMIO_PASSWORD: Your Dremio password")
-    print("   - OPENAI_API_KEY: (Optional) Your OpenAI API key for enhanced features")
+    print("   - ANTHROPIC_API_KEY: (Optional) Your Anthropic API key for enhanced features")
     
     return True
 
@@ -111,7 +111,7 @@ def create_claude_config():
         "DREMIO_PASSWORD": "your-password",
         "DREMIO_USE_SSL": "true",
         "DREMIO_VERIFY_SSL": "true",
-        "OPENAI_API_KEY": "your-openai-api-key"
+        "ANTHROPIC_API_KEY": "your-anthropic-api-key"
       }}
     }}
   }}
