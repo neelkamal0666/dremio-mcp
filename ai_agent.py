@@ -424,8 +424,10 @@ class DremioAIAgent:
                 f"Intent analysis: {json.dumps(intent, indent=2)}\n\n"
                 "Generate a SQL query that answers the user's question. Use the table documentation above "
                 "to understand column names and business context. If the query involves aggregations, "
-                "include appropriate GROUP BY clauses. If you don't know the exact table name, use a reasonable guess "
-                "based on the query context and available tables.\n\n"
+                "include appropriate GROUP BY clauses.\n\n"
+                "TABLE NAME MATCHING: When the user asks about 'accounts', 'customers', etc., look for tables "
+                "in the available tables list that contain those words (case-insensitive). Use the full "
+                "qualified name (schema.table) from the available tables list.\n\n"
                 "IMPORTANT: Avoid using reserved SQL words as column aliases. Use descriptive aliases like "
                 "'total_count', 'record_count', 'customer_count', etc. instead of 'count'.\n\n"
                 "Return only the SQL query, no explanations."
@@ -458,15 +460,41 @@ class DremioAIAgent:
         # Extract potential table names from common patterns
         potential_table = None
         
-        # Look for common table names in the query
-        common_tables = ['accounts', 'customers', 'users', 'orders', 'products', 'sales', 'demographics', 'profile', 'data']
-        for table in common_tables:
-            if table in query_lower:
-                potential_table = table
-                break
+        # First, try to find matching tables from the actual table list
+        try:
+            if self.dremio_client:
+                available_tables = self.dremio_client.list_tables()
+                logger.info(f"Available tables for matching: {available_tables[:10]}")  # Log first 10 tables
+                
+                # Look for tables that match query terms (case-insensitive)
+                for schema, table in available_tables:
+                    table_lower = table.lower()
+                    schema_lower = schema.lower()
+                    
+                    # Check if any word from the query matches the table name
+                    query_words = query_lower.split()
+                    for word in query_words:
+                        if word in table_lower or word in schema_lower:
+                            potential_table = f"{schema}.{table}"
+                            logger.info(f"Found matching table: {potential_table} (matched word: {word})")
+                            break
+                    if potential_table:
+                        break
+        except Exception as e:
+            logger.warning(f"Could not get available tables for heuristic: {str(e)}")
+        
+        # Fallback to common table names if no match found
+        if not potential_table:
+            logger.info(f"No matching table found in available tables, trying common table names")
+            common_tables = ['accounts', 'customers', 'users', 'orders', 'products', 'sales', 'demographics', 'profile', 'data']
+            for table in common_tables:
+                if table in query_lower:
+                    potential_table = table
+                    logger.info(f"Using common table name: {potential_table}")
+                    break
         
         # If we have entities from intent analysis, use those
-        if intent['entities']:
+        if intent['entities'] and not potential_table:
             potential_table = intent['entities'][0]
         
         # Simple heuristics for common queries

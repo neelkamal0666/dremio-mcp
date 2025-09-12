@@ -33,6 +33,9 @@ test-wiki: ## Test wiki metadata functionality
 test-sql: ## Test SQL generation fixes
 	python test_sql_generation.py
 
+test-table-matching: ## Test table name matching fixes
+	python test_table_matching.py
+
 test-connection: ## Test Dremio connection
 	python cli.py test-connection
 
