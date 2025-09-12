@@ -30,6 +30,9 @@ test-queries: ## Test query processing
 test-wiki: ## Test wiki metadata functionality
 	python test_wiki.py
 
+test-sql: ## Test SQL generation fixes
+	python test_sql_generation.py
+
 test-connection: ## Test Dremio connection
 	python cli.py test-connection
 

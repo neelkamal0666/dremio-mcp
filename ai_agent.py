@@ -180,6 +180,9 @@ class DremioAIAgent:
                         'suggestion': "Try being more specific about the table and columns you want to query. For example: 'How many records are in the accounts table?'"
                     }
             
+            # Log the generated SQL for debugging
+            logger.info(f"Generated SQL query: {sql_query}")
+            
             # Execute the query
             result_df = self.dremio_client.execute_query(sql_query)
             
@@ -422,7 +425,10 @@ class DremioAIAgent:
                 "Generate a SQL query that answers the user's question. Use the table documentation above "
                 "to understand column names and business context. If the query involves aggregations, "
                 "include appropriate GROUP BY clauses. If you don't know the exact table name, use a reasonable guess "
-                "based on the query context and available tables. Return only the SQL query, no explanations."
+                "based on the query context and available tables.\n\n"
+                "IMPORTANT: Avoid using reserved SQL words as column aliases. Use descriptive aliases like "
+                "'total_count', 'record_count', 'customer_count', etc. instead of 'count'.\n\n"
+                "Return only the SQL query, no explanations."
             )
             
             def _call_anthropic():
@@ -437,6 +443,9 @@ class DremioAIAgent:
             sql_query = response.content[0].text.strip()
             sql_query = re.sub(r'^```sql\s*', '', sql_query)
             sql_query = re.sub(r'\s*```$', '', sql_query)
+            
+            # Clean up common SQL issues
+            sql_query = self._clean_sql_query(sql_query)
             return sql_query
         except Exception as e:
             logger.warning(f"AI SQL generation failed: {str(e)}")
@@ -463,27 +472,56 @@ class DremioAIAgent:
         # Simple heuristics for common queries
         if 'show me' in query_lower or 'display' in query_lower:
             if potential_table:
-                return f"SELECT * FROM {potential_table} LIMIT 100"
+                sql = f"SELECT * FROM {potential_table} LIMIT 100"
             else:
-                return "SELECT * FROM accounts LIMIT 100"  # Default fallback
+                sql = "SELECT * FROM accounts LIMIT 100"  # Default fallback
+            return self._clean_sql_query(sql)
         
         if 'count' in query_lower or 'how many' in query_lower:
             if potential_table:
-                return f"SELECT COUNT(*) as count FROM {potential_table}"
+                sql = f"SELECT COUNT(*) as total_count FROM {potential_table}"
             else:
-                return "SELECT COUNT(*) as count FROM accounts"  # Default fallback
+                sql = "SELECT COUNT(*) as total_count FROM accounts"  # Default fallback
+            return self._clean_sql_query(sql)
         
         if 'list' in query_lower:
             if potential_table:
-                return f"SELECT * FROM {potential_table} LIMIT 50"
+                sql = f"SELECT * FROM {potential_table} LIMIT 50"
             else:
-                return "SELECT * FROM accounts LIMIT 50"  # Default fallback
+                sql = "SELECT * FROM accounts LIMIT 50"  # Default fallback
+            return self._clean_sql_query(sql)
         
         # If we have a potential table but no specific pattern, do a basic select
         if potential_table:
-            return f"SELECT * FROM {potential_table} LIMIT 10"
+            sql = f"SELECT * FROM {potential_table} LIMIT 10"
+            return self._clean_sql_query(sql)
         
         return None
+    
+    def _clean_sql_query(self, sql_query: str) -> str:
+        """Clean up common SQL issues and reserved word conflicts"""
+        if not sql_query:
+            return sql_query
+        
+        # Replace common reserved word aliases
+        sql_query = re.sub(r'\bas\s+count\b', ' as total_count', sql_query, flags=re.IGNORECASE)
+        sql_query = re.sub(r'\bas\s+order\b', ' as order_info', sql_query, flags=re.IGNORECASE)
+        sql_query = re.sub(r'\bas\s+group\b', ' as group_info', sql_query, flags=re.IGNORECASE)
+        sql_query = re.sub(r'\bas\s+user\b', ' as user_info', sql_query, flags=re.IGNORECASE)
+        sql_query = re.sub(r'\bas\s+data\b', ' as data_info', sql_query, flags=re.IGNORECASE)
+        
+        # Ensure proper spacing around keywords
+        sql_query = re.sub(r'\bSELECT\b', 'SELECT', sql_query, flags=re.IGNORECASE)
+        sql_query = re.sub(r'\bFROM\b', ' FROM', sql_query, flags=re.IGNORECASE)
+        sql_query = re.sub(r'\bWHERE\b', ' WHERE', sql_query, flags=re.IGNORECASE)
+        sql_query = re.sub(r'\bGROUP\s+BY\b', ' GROUP BY', sql_query, flags=re.IGNORECASE)
+        sql_query = re.sub(r'\bORDER\s+BY\b', ' ORDER BY', sql_query, flags=re.IGNORECASE)
+        sql_query = re.sub(r'\bLIMIT\b', ' LIMIT', sql_query, flags=re.IGNORECASE)
+        
+        # Remove extra whitespace
+        sql_query = re.sub(r'\s+', ' ', sql_query).strip()
+        
+        return sql_query
     
     def get_query_suggestions(self, partial_query: str) -> List[str]:
         """Get query suggestions based on partial input"""
