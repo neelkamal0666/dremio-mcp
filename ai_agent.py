@@ -44,6 +44,9 @@ class DremioAIAgent:
             # Analyze the query to understand intent
             intent = self._analyze_query_intent(user_query)
             
+            # Debug logging
+            logger.info(f"Query: '{user_query}' -> Intent: {intent}")
+            
             if intent['type'] == 'data_query':
                 return await self._handle_data_query(user_query, intent)
             elif intent['type'] == 'schema_inquiry':
@@ -56,7 +59,8 @@ class DremioAIAgent:
                 return {
                     'success': False,
                     'error': f"Unsupported query type: {intent['type']}",
-                    'suggestion': "Try asking about data, table schemas, or available tables"
+                    'suggestion': "Try asking about data, table schemas, or available tables",
+                    'debug_info': f"Intent analysis: {intent}"
                 }
                 
         except Exception as e:
@@ -89,8 +93,9 @@ class DremioAIAgent:
         # Table exploration patterns
         table_patterns = [
             r'tables|datasets|sources',
-            r'available|list all|show all',
-            r'what tables|what datasets'
+            r'available|list all|show all|show me all',
+            r'what tables|what datasets',
+            r'show me.*tables|list.*tables|display.*tables'
         ]
         
         # Metadata patterns
@@ -106,8 +111,34 @@ class DremioAIAgent:
             'aggregations': []
         }
         
-        # Check for data query intent
-        if any(re.search(pattern, query_lower) for pattern in data_patterns):
+        # Check for table exploration intent FIRST (most specific)
+        if any(re.search(pattern, query_lower) for pattern in table_patterns):
+            intent['type'] = 'table_exploration'
+            
+            # Extract source/schema filters
+            if 'source' in query_lower:
+                source_match = re.search(r'source[:\s]+([a-zA-Z_][a-zA-Z0-9_]*)', query_lower)
+                if source_match:
+                    intent['filters']['source'] = source_match.group(1)
+        
+        # Check for schema inquiry intent
+        elif any(re.search(pattern, query_lower) for pattern in schema_patterns):
+            intent['type'] = 'schema_inquiry'
+            
+            # Extract table names
+            table_matches = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_.]*\b', query)
+            intent['entities'] = [match for match in table_matches if '.' in match]
+        
+        # Check for metadata intent
+        elif any(re.search(pattern, query_lower) for pattern in metadata_patterns):
+            intent['type'] = 'metadata_request'
+            
+            # Extract table names
+            table_matches = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_.]*\b', query)
+            intent['entities'] = [match for match in table_matches if '.' in match]
+        
+        # Check for data query intent LAST (least specific)
+        elif any(re.search(pattern, query_lower) for pattern in data_patterns):
             intent['type'] = 'data_query'
             
             # Extract potential table names (simple heuristic)
@@ -126,32 +157,6 @@ class DremioAIAgent:
             for agg_type, pattern in agg_patterns.items():
                 if re.search(pattern, query_lower):
                     intent['aggregations'].append(agg_type)
-        
-        # Check for schema inquiry intent
-        elif any(re.search(pattern, query_lower) for pattern in schema_patterns):
-            intent['type'] = 'schema_inquiry'
-            
-            # Extract table names
-            table_matches = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_.]*\b', query)
-            intent['entities'] = [match for match in table_matches if '.' in match]
-        
-        # Check for table exploration intent
-        elif any(re.search(pattern, query_lower) for pattern in table_patterns):
-            intent['type'] = 'table_exploration'
-            
-            # Extract source/schema filters
-            if 'source' in query_lower:
-                source_match = re.search(r'source[:\s]+([a-zA-Z_][a-zA-Z0-9_]*)', query_lower)
-                if source_match:
-                    intent['filters']['source'] = source_match.group(1)
-        
-        # Check for metadata intent
-        elif any(re.search(pattern, query_lower) for pattern in metadata_patterns):
-            intent['type'] = 'metadata_request'
-            
-            # Extract table names
-            table_matches = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_.]*\b', query)
-            intent['entities'] = [match for match in table_matches if '.' in match]
         
         return intent
     

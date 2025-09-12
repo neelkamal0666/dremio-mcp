@@ -92,6 +92,10 @@ def test_connection(host, port, username, password, ssl, verify, cert_path, flig
 @click.option('--default-schema', default=os.getenv('DREMIO_DEFAULT_SCHEMA'), help='Default schema to scope listings (defaults to DREMIO_DEFAULT_SCHEMA)')
 def interactive(anthropic_key, host, port, ssl, verify, cert_path, flight_port, default_source, default_schema):
     """Start interactive AI agent session"""
+    asyncio.run(_interactive_async(anthropic_key, host, port, ssl, verify, cert_path, flight_port, default_source, default_schema))
+
+async def _interactive_async(anthropic_key, host, port, ssl, verify, cert_path, flight_port, default_source, default_schema):
+    """Async implementation of interactive session"""
     # Prefer explicit flag; fallback to environment variable
     if not anthropic_key:
         anthropic_key = os.getenv('ANTHROPIC_API_KEY')
@@ -163,8 +167,8 @@ def interactive(anthropic_key, host, port, ssl, verify, cert_path, flight_port, 
                     show_sample(client, table_name)
                     continue
                 
-                # Process natural language query
-                result = asyncio.run(agent.process_query(user_input))
+                # Process natural language query (now properly awaited)
+                result = await agent.process_query(user_input)
                 display_result(result)
                 
             except KeyboardInterrupt:

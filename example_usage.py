@@ -25,14 +25,30 @@ async def main():
         'port': int(os.getenv('DREMIO_PORT', '9047')),
         'username': os.getenv('DREMIO_USERNAME', ''),
         'password': os.getenv('DREMIO_PASSWORD', ''),
-        'use_ssl': os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true'
+        'use_ssl': os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true',
+        'verify_ssl': os.getenv('DREMIO_VERIFY_SSL', 'true').lower() == 'true',
+        'cert_path': os.getenv('DREMIO_CERT_PATH'),
+        'flight_port': int(os.getenv('DREMIO_FLIGHT_PORT', os.getenv('DREMIO_PORT', '32010'))),
+        'default_source': os.getenv('DREMIO_DEFAULT_SOURCE'),
+        'default_schema': os.getenv('DREMIO_DEFAULT_SCHEMA')
     }
     
     print("🚀 Dremio MCP Server and AI Agent Example")
     print("=" * 50)
     
     # Initialize Dremio client
-    print("📡 Connecting to Dremio...")
+    use_ssl = config['use_ssl']
+    verify_ssl = config['verify_ssl']
+    host = config['host']
+    port = config['port']
+    scheme = 'https' if use_ssl else 'http'
+    
+    print(f"📡 Connecting to Dremio at {scheme}://{host}:{port} (verify_ssl={'on' if verify_ssl else 'off'})...")
+    if config.get('cert_path'):
+        print(f"Using CA bundle: {config['cert_path']}")
+    if config.get('default_source') or config.get('default_schema'):
+        print(f"Default scope: source={config.get('default_source')}, schema={config.get('default_schema')}")
+    
     client = DremioClient(config)
     
     if not client.authenticate():

@@ -21,6 +21,9 @@ test: ## Run test suite
 test-anthropic: ## Test Anthropic Claude integration
 	python test_anthropic.py
 
+test-intent: ## Test intent analysis
+	python test_intent.py
+
 test-connection: ## Test Dremio connection
 	python cli.py test-connection
 
