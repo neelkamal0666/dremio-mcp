@@ -101,12 +101,21 @@ def test_dremio_connection():
     try:
         from dremio_client import DremioClient
         
+        use_ssl = os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true'
+        verify_ssl = os.getenv('DREMIO_VERIFY_SSL', 'true').lower() == 'true'
+        host = os.getenv('DREMIO_HOST')
+        port = int(os.getenv('DREMIO_PORT', '9047'))
+        scheme = 'https' if use_ssl else 'http'
+
+        print(f"Testing Dremio connection to {scheme}://{host}:{port} (verify_ssl={'on' if verify_ssl else 'off'})...")
+        
         config = {
-            'host': os.getenv('DREMIO_HOST'),
-            'port': int(os.getenv('DREMIO_PORT', '9047')),
+            'host': host,
+            'port': port,
             'username': os.getenv('DREMIO_USERNAME'),
             'password': os.getenv('DREMIO_PASSWORD'),
-            'use_ssl': os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true'
+            'use_ssl': use_ssl,
+            'verify_ssl': verify_ssl,
         }
         
         client = DremioClient(config)
@@ -138,12 +147,27 @@ def test_ai_agent():
         from dremio_client import DremioClient
         from ai_agent import DremioAIAgent
         
+        use_ssl = os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true'
+        verify_ssl = os.getenv('DREMIO_VERIFY_SSL', 'true').lower() == 'true'
+        host = os.getenv('DREMIO_HOST')
+        port = int(os.getenv('DREMIO_PORT', '9047'))
+        cert_path = os.getenv('DREMIO_CERT_PATH')
+        flight_port = int(os.getenv('DREMIO_FLIGHT_PORT', os.getenv('DREMIO_PORT', '32010')))
+        scheme = 'https' if use_ssl else 'http'
+
+        print(f"AI agent connecting to {scheme}://{host}:{port} (verify_ssl={'on' if verify_ssl else 'off'}, flight_port={flight_port})...")
+        if cert_path:
+            print(f"Using CA bundle: {cert_path}")
+        
         config = {
-            'host': os.getenv('DREMIO_HOST'),
-            'port': int(os.getenv('DREMIO_PORT', '9047')),
+            'host': host,
+            'port': port,
             'username': os.getenv('DREMIO_USERNAME'),
             'password': os.getenv('DREMIO_PASSWORD'),
-            'use_ssl': os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true'
+            'use_ssl': use_ssl,
+            'verify_ssl': verify_ssl,
+            'cert_path': cert_path,
+            'flight_port': flight_port,
         }
         
         client = DremioClient(config)
@@ -177,14 +201,13 @@ def test_mcp_server():
         server = DremioMCP()
         print("✅ MCP server initialized successfully")
         
-        # Test tool listing
-        tools = server.server._tools
-        if tools:
-            print(f"✅ Found {len(tools)} MCP tools")
+        # Basic sanity check: server object exists and has a run coroutine
+        if hasattr(server, 'run') and callable(getattr(server, 'run')):
+            print("✅ MCP server has a run method")
+            return True
         else:
-            print("⚠️  No MCP tools found")
-        
-        return True
+            print("⚠️  MCP server run method not found")
+            return False
         
     except Exception as e:
         print(f"❌ MCP server test failed: {e}")

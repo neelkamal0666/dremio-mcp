@@ -110,6 +110,7 @@ def create_claude_config():
         "DREMIO_USERNAME": "your-username",
         "DREMIO_PASSWORD": "your-password",
         "DREMIO_USE_SSL": "true",
+        "DREMIO_VERIFY_SSL": "true",
         "OPENAI_API_KEY": "your-openai-api-key"
       }}
     }}

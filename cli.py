@@ -35,17 +35,27 @@ def cli():
 @click.option('--username', default=os.getenv('DREMIO_USERNAME', ''), help='Dremio username')
 @click.option('--password', default=os.getenv('DREMIO_PASSWORD', ''), help='Dremio password')
 @click.option('--ssl/--no-ssl', default=os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true', help='Use SSL')
-def test_connection(host, port, username, password, ssl):
+@click.option('--verify/--no-verify', default=os.getenv('DREMIO_VERIFY_SSL', 'true').lower() == 'true', help='Verify SSL certificates')
+@click.option('--cert-path', default=os.getenv('DREMIO_CERT_PATH'), help='Custom CA bundle path')
+@click.option('--flight-port', default=int(os.getenv('DREMIO_FLIGHT_PORT', os.getenv('DREMIO_PORT', '32010'))), help='Dremio Flight SQL port')
+@click.option('--default-source', default=os.getenv('DREMIO_DEFAULT_SOURCE'), help='Default source to scope listings')
+@click.option('--default-schema', default=os.getenv('DREMIO_DEFAULT_SCHEMA'), help='Default schema to scope listings')
+def test_connection(host, port, username, password, ssl, verify, cert_path, flight_port, default_source, default_schema):
     """Test connection to Dremio"""
     config = {
         'host': host,
         'port': port,
         'username': username,
         'password': password,
-        'use_ssl': ssl
+        'use_ssl': ssl,
+        'verify_ssl': verify,
+        'cert_path': cert_path,
+        'flight_port': flight_port,
+        'default_source': default_source,
+        'default_schema': default_schema,
     }
     
-    click.echo(f"Testing connection to {host}:{port}...")
+    click.echo(f"Testing connection to {host}:{port} (ssl={'on' if ssl else 'off'}, verify={'on' if verify else 'off'}, flight_port={flight_port})...")
     
     try:
         client = DremioClient(config)
@@ -71,20 +81,48 @@ def test_connection(host, port, username, password, ssl):
         sys.exit(1)
 
 @cli.command()
-@click.option('--openai-key', help='OpenAI API key for enhanced AI features')
-def interactive(openai_key):
+@click.option('--openai-key', help='OpenAI API key for enhanced AI features (defaults to OPENAI_API_KEY env var)')
+@click.option('--host', default=os.getenv('DREMIO_HOST', 'localhost'), help='Dremio host')
+@click.option('--port', default=int(os.getenv('DREMIO_PORT', '9047')), help='Dremio REST port')
+@click.option('--ssl/--no-ssl', default=os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true', help='Use SSL for REST')
+@click.option('--verify/--no-verify', default=os.getenv('DREMIO_VERIFY_SSL', 'true').lower() == 'true', help='Verify SSL certificates')
+@click.option('--cert-path', default=os.getenv('DREMIO_CERT_PATH'), help='Custom CA bundle path')
+@click.option('--flight-port', default=int(os.getenv('DREMIO_FLIGHT_PORT', os.getenv('DREMIO_PORT', '32010'))), help='Dremio Flight SQL port')
+@click.option('--default-source', default=os.getenv('DREMIO_DEFAULT_SOURCE'), help='Default source to scope listings (defaults to DREMIO_DEFAULT_SOURCE)')
+@click.option('--default-schema', default=os.getenv('DREMIO_DEFAULT_SCHEMA'), help='Default schema to scope listings (defaults to DREMIO_DEFAULT_SCHEMA)')
+def interactive(openai_key, host, port, ssl, verify, cert_path, flight_port, default_source, default_schema):
     """Start interactive AI agent session"""
+    # Prefer explicit flag; fallback to environment variable
+    if not openai_key:
+        openai_key = os.getenv('OPENAI_API_KEY')
+    # If defaults are still None, fall back to env here as well
+    default_source = default_source or os.getenv('DREMIO_DEFAULT_SOURCE')
+    default_schema = default_schema or os.getenv('DREMIO_DEFAULT_SCHEMA')
+    
     config = {
-        'host': os.getenv('DREMIO_HOST', 'localhost'),
-        'port': int(os.getenv('DREMIO_PORT', '9047')),
+        'host': host,
+        'port': port,
         'username': os.getenv('DREMIO_USERNAME', ''),
         'password': os.getenv('DREMIO_PASSWORD', ''),
-        'use_ssl': os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true'
+        'use_ssl': ssl,
+        'verify_ssl': verify,
+        'cert_path': cert_path,
+        'flight_port': flight_port,
+        'default_source': default_source,
+        'default_schema': default_schema,
     }
     
     if not config['username'] or not config['password']:
         click.echo("❌ Please set DREMIO_USERNAME and DREMIO_PASSWORD environment variables")
         sys.exit(1)
+    
+    click.echo(f"Connecting to {('https' if ssl else 'http')}://{host}:{port} (verify={'on' if verify else 'off'}, flight_port={flight_port})...")
+    if cert_path:
+        click.echo(f"Using CA bundle: {cert_path}")
+    if default_source or default_schema:
+        click.echo(f"Default scope: source={default_source}, schema={default_schema}")
+    if openai_key:
+        click.echo("Using OpenAI key from environment/flag")
     
     try:
         # Initialize client and agent
@@ -98,7 +136,7 @@ def interactive(openai_key):
             agent.set_openai_key(openai_key)
             click.echo("🤖 AI Agent initialized with OpenAI support")
         else:
-            click.echo("🤖 AI Agent initialized (basic mode - set OpenAI key for enhanced features)")
+            click.echo("🤖 AI Agent initialized (basic mode - set OPENAI_API_KEY in .env or use --openai-key)")
         
         click.echo("✅ Connected to Dremio! Type 'help' for commands or ask questions about your data.")
         click.echo("Type 'exit' to quit.\n")
@@ -142,14 +180,27 @@ def interactive(openai_key):
 @cli.command()
 @click.option('--query', required=True, help='SQL query to execute')
 @click.option('--limit', default=100, help='Maximum number of rows to return')
-def query(query, limit):
+@click.option('--host', default=os.getenv('DREMIO_HOST', 'localhost'), help='Dremio host')
+@click.option('--port', default=int(os.getenv('DREMIO_PORT', '9047')), help='Dremio port')
+@click.option('--ssl/--no-ssl', default=os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true', help='Use SSL')
+@click.option('--verify/--no-verify', default=os.getenv('DREMIO_VERIFY_SSL', 'true').lower() == 'true', help='Verify SSL certificates')
+@click.option('--cert-path', default=os.getenv('DREMIO_CERT_PATH'), help='Custom CA bundle path')
+@click.option('--flight-port', default=int(os.getenv('DREMIO_FLIGHT_PORT', os.getenv('DREMIO_PORT', '32010'))), help='Dremio Flight SQL port')
+@click.option('--default-source', default=os.getenv('DREMIO_DEFAULT_SOURCE'), help='Default source to scope listings')
+@click.option('--default-schema', default=os.getenv('DREMIO_DEFAULT_SCHEMA'), help='Default schema to scope listings')
+def query(query, limit, host, port, ssl, verify, cert_path, flight_port, default_source, default_schema):
     """Execute a SQL query directly"""
     config = {
-        'host': os.getenv('DREMIO_HOST', 'localhost'),
-        'port': int(os.getenv('DREMIO_PORT', '9047')),
+        'host': host,
+        'port': port,
         'username': os.getenv('DREMIO_USERNAME', ''),
         'password': os.getenv('DREMIO_PASSWORD', ''),
-        'use_ssl': os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true'
+        'use_ssl': ssl,
+        'verify_ssl': verify,
+        'cert_path': cert_path,
+        'flight_port': flight_port,
+        'default_source': default_source,
+        'default_schema': default_schema,
     }
     
     try:

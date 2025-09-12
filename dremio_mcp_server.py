@@ -30,8 +30,7 @@ from mcp.types import (
     Tool,
 )
 from pydantic import BaseModel
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import SQLAlchemyError
+from dremio_client import DremioClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +45,11 @@ class DremioConfig(BaseModel):
     use_ssl: bool = True
     client_id: Optional[str] = None
     client_secret: Optional[str] = None
+    verify_ssl: bool = True
+    cert_path: Optional[str] = None
+    flight_port: Optional[int] = None
+    default_source: Optional[str] = None
+    default_schema: Optional[str] = None
 
 class DremioMCP:
     """Main MCP server class for Dremio integration"""
@@ -53,8 +57,7 @@ class DremioMCP:
     def __init__(self):
         self.server = Server("dremio-mcp-server")
         self.config = self._load_config()
-        self.engine = None
-        self.session = None
+        self.client = self._create_client()
         self._setup_handlers()
         
     def _load_config(self) -> DremioConfig:
@@ -66,8 +69,32 @@ class DremioMCP:
             password=os.getenv("DREMIO_PASSWORD", ""),
             use_ssl=os.getenv("DREMIO_USE_SSL", "true").lower() == "true",
             client_id=os.getenv("DREMIO_CLIENT_ID"),
-            client_secret=os.getenv("DREMIO_CLIENT_SECRET")
+            client_secret=os.getenv("DREMIO_CLIENT_SECRET"),
+            verify_ssl=os.getenv("DREMIO_VERIFY_SSL", "true").lower() == "true",
+            cert_path=os.getenv("DREMIO_CERT_PATH"),
+            flight_port=int(os.getenv("DREMIO_FLIGHT_PORT", os.getenv("DREMIO_PORT", "32010"))),
+            default_source=os.getenv("DREMIO_DEFAULT_SOURCE"),
+            default_schema=os.getenv("DREMIO_DEFAULT_SCHEMA"),
         )
+    
+    def _create_client(self) -> DremioClient:
+        """Instantiate DremioClient using loaded config and authenticate"""
+        cfg = {
+            'host': self.config.host,
+            'port': self.config.port,
+            'username': self.config.username,
+            'password': self.config.password,
+            'use_ssl': self.config.use_ssl,
+            'verify_ssl': self.config.verify_ssl,
+            'cert_path': self.config.cert_path,
+            'flight_port': self.config.flight_port,
+            'default_source': self.config.default_source,
+            'default_schema': self.config.default_schema,
+        }
+        client = DremioClient(cfg)
+        if not client.authenticate():
+            logger.error("Failed to authenticate Dremio client for MCP server")
+        return client
     
     def _setup_handlers(self):
         """Setup MCP server handlers"""
@@ -203,14 +230,6 @@ class DremioMCP:
                     content=[TextContent(type="text", text=f"Error: {str(e)}")]
                 )
     
-    async def _get_connection(self):
-        """Get or create database connection"""
-        if self.engine is None:
-            protocol = "dremio+flight" if self.config.use_ssl else "dremio+flight"
-            connection_string = f"{protocol}://{self.config.username}:{self.config.password}@{self.config.host}:{self.config.port}"
-            self.engine = create_engine(connection_string)
-        return self.engine
-    
     async def _query_dremio(self, arguments: Dict[str, Any]) -> CallToolResult:
         """Execute SQL query against Dremio"""
         query = arguments.get("query", "")
@@ -222,34 +241,22 @@ class DremioMCP:
             )
         
         try:
-            engine = await self._get_connection()
-            
             # Add LIMIT if not present and limit is specified
             if limit and "LIMIT" not in query.upper():
                 query = f"{query} LIMIT {limit}"
-            
-            with engine.connect() as conn:
-                result = conn.execute(text(query))
-                columns = result.keys()
-                rows = result.fetchall()
+
+            df = self.client.execute_query(query)
                 
-                # Convert to DataFrame for better formatting
-                df = pd.DataFrame(rows, columns=columns)
+            result_text = f"Query executed successfully. Returned {len(df)} rows.\n\n"
+            result_text += df.to_string(index=False, max_rows=100)
                 
-                result_text = f"Query executed successfully. Returned {len(df)} rows.\n\n"
-                result_text += df.to_string(index=False, max_rows=100)
+            if len(df) >= 100:
+                result_text += f"\n\n... (showing first 100 rows of {len(df)} total)"
                 
-                if len(df) >= 100:
-                    result_text += f"\n\n... (showing first 100 rows of {len(df)} total)"
-                
-                return CallToolResult(
-                    content=[TextContent(type="text", text=result_text)]
-                )
-                
-        except SQLAlchemyError as e:
             return CallToolResult(
-                content=[TextContent(type="text", text=f"SQL Error: {str(e)}")]
+                content=[TextContent(type="text", text=result_text)]
             )
+                
         except Exception as e:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"Error executing query: {str(e)}")]
@@ -260,8 +267,6 @@ class DremioMCP:
         table_path = arguments.get("table_path", "")
         
         try:
-            engine = await self._get_connection()
-            
             # Query to get table schema
             schema_query = f"""
             SELECT 
@@ -274,23 +279,19 @@ class DremioMCP:
             ORDER BY ordinal_position
             """
             
-            with engine.connect() as conn:
-                result = conn.execute(text(schema_query))
-                columns = result.keys()
-                rows = result.fetchall()
-                
-                if not rows:
-                    return CallToolResult(
-                        content=[TextContent(type="text", text=f"Table '{table_path}' not found or no schema information available")]
-                    )
-                
-                df = pd.DataFrame(rows, columns=columns)
-                result_text = f"Schema for table '{table_path}':\n\n"
-                result_text += df.to_string(index=False)
-                
+            df = self.client.execute_query(schema_query)
+            
+            if df.empty:
                 return CallToolResult(
-                    content=[TextContent(type="text", text=result_text)]
+                    content=[TextContent(type="text", text=f"Table '{table_path}' not found or no schema information available")]
                 )
+                
+            result_text = f"Schema for table '{table_path}':\n\n"
+            result_text += df.to_string(index=False)
+                
+            return CallToolResult(
+                content=[TextContent(type="text", text=result_text)]
+            )
                 
         except Exception as e:
             return CallToolResult(
@@ -303,38 +304,32 @@ class DremioMCP:
         schema = arguments.get("schema")
         
         try:
-            engine = await self._get_connection()
-            
             # Build query based on filters
             query = "SELECT table_schema, table_name FROM INFORMATION_SCHEMA.TABLES WHERE table_type = 'BASE TABLE'"
-            params = []
             
             if source:
-                query += " AND table_schema LIKE ?"
-                params.append(f"{source}%")
+                query += f" AND table_schema LIKE '{source}%'"
             
             if schema:
-                query += " AND table_schema = ?"
-                params.append(schema)
+                query += f" AND table_schema = '{schema}'"
             
             query += " ORDER BY table_schema, table_name"
             
-            with engine.connect() as conn:
-                result = conn.execute(text(query), params)
-                rows = result.fetchall()
-                
-                if not rows:
-                    return CallToolResult(
-                        content=[TextContent(type="text", text="No tables found")]
-                    )
-                
-                result_text = f"Found {len(rows)} tables:\n\n"
-                for schema_name, table_name in rows:
-                    result_text += f"- {schema_name}.{table_name}\n"
-                
+            df = self.client.execute_query(query)
+            rows = list(df.itertuples(index=False, name=None))
+            
+            if not rows:
                 return CallToolResult(
-                    content=[TextContent(type="text", text=result_text)]
+                    content=[TextContent(type="text", text="No tables found")]
                 )
+                
+            result_text = f"Found {len(rows)} tables:\n\n"
+            for schema_name, table_name in rows:
+                result_text += f"- {schema_name}.{table_name}\n"
+                
+            return CallToolResult(
+                content=[TextContent(type="text", text=result_text)]
+            )
                 
         except Exception as e:
             return CallToolResult(
@@ -388,8 +383,6 @@ class DremioMCP:
         search_term = arguments.get("search_term", "").lower()
         
         try:
-            engine = await self._get_connection()
-            
             # Search in table names
             query = """
             SELECT table_schema, table_name 
@@ -400,22 +393,21 @@ class DremioMCP:
             
             search_pattern = f"%{search_term}%"
             
-            with engine.connect() as conn:
-                result = conn.execute(text(query), [search_pattern, search_pattern])
-                rows = result.fetchall()
+            df = self.client.execute_query(query, [search_pattern, search_pattern])
+            rows = list(df.itertuples(index=False, name=None))
                 
-                if not rows:
-                    return CallToolResult(
-                        content=[TextContent(type="text", text=f"No tables found matching '{search_term}'")]
-                    )
-                
-                result_text = f"Found {len(rows)} tables matching '{search_term}':\n\n"
-                for schema_name, table_name in rows:
-                    result_text += f"- {schema_name}.{table_name}\n"
-                
+            if not rows:
                 return CallToolResult(
-                    content=[TextContent(type="text", text=result_text)]
+                    content=[TextContent(type="text", text=f"No tables found matching '{search_term}'")]
                 )
+                
+            result_text = f"Found {len(rows)} tables matching '{search_term}':\n\n"
+            for schema_name, table_name in rows:
+                result_text += f"- {schema_name}.{table_name}\n"
+                
+            return CallToolResult(
+                content=[TextContent(type="text", text=result_text)]
+            )
                 
         except Exception as e:
             return CallToolResult(

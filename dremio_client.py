@@ -13,7 +13,7 @@ import json
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urljoin
+from urllib.parse import urlencode
 
 import pandas as pd
 import requests
@@ -31,7 +31,17 @@ class DremioClient:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.base_url = f"{'https' if config.get('use_ssl', True) else 'http'}://{config['host']}:{config.get('port', 9047)}"
-        self.api_url = f"{self.base_url}/api/v3"
+        # Use v3 for data APIs; v2 only for login endpoint
+        self.api_v3 = f"{self.base_url}/api/v3"
+        self.api_v2 = f"{self.base_url}/api/v2"
+        # SSL verification preference and optional custom CA bundle
+        self.verify_ssl = bool(config.get('verify_ssl', True))
+        self.cert_path = config.get('cert_path')
+        # Flight SQL configuration (separate port from REST)
+        self.flight_port = int(config.get('flight_port', config.get('port', 32010)))
+        # Default scoping
+        self.default_source = config.get('default_source')
+        self.default_schema = config.get('default_schema')
         self.session = self._create_session()
         self.token = None
         self.engine = None
@@ -50,12 +60,27 @@ class DremioClient:
         session.mount("http://", adapter)
         session.mount("https://", adapter)
         
+        # Apply SSL verification preference
+        if not self.config.get('use_ssl', True):
+            session.verify = True  # not used for http
+        else:
+            if not self.verify_ssl:
+                session.verify = False
+            elif self.cert_path and os.path.exists(self.cert_path):
+                session.verify = self.cert_path
+            else:
+                session.verify = True
+        
+        # Default headers
+        session.headers.update({'Content-Type': 'application/json'})
+        
         return session
     
     def authenticate(self) -> bool:
         """Authenticate with Dremio and get access token"""
         try:
-            auth_url = f"{self.api_url}/login"
+            # Dremio login is on /apiv2/login
+            auth_url = f"{self.base_url}/apiv2/login"
             
             # Try OAuth first if credentials are provided
             if self.config.get('client_id') and self.config.get('client_secret'):
@@ -74,9 +99,9 @@ class DremioClient:
             self.token = result.get('token')
             
             if self.token:
+                # Dremio expects Authorization: _dremio{token}
                 self.session.headers.update({
-                    'Authorization': f'Bearer {self.token}',
-                    'Content-Type': 'application/json'
+                    'Authorization': f"_dremio{self.token}",
                 })
                 logger.info("Successfully authenticated with Dremio")
                 return True
@@ -87,75 +112,135 @@ class DremioClient:
         except requests.exceptions.RequestException as e:
             logger.error(f"Authentication error: {str(e)}")
             return False
-    
-    def _authenticate_oauth(self) -> bool:
-        """Authenticate using OAuth2"""
-        try:
-            # This is a simplified OAuth flow - adjust based on your Dremio OAuth setup
-            oauth_url = f"{self.api_url}/oauth/token"
-            
-            oauth_data = {
-                "grant_type": "client_credentials",
-                "client_id": self.config['client_id'],
-                "client_secret": self.config['client_secret']
-            }
-            
-            response = self.session.post(oauth_url, data=oauth_data)
-            response.raise_for_status()
-            
-            result = response.json()
-            self.token = result.get('access_token')
-            
-            if self.token:
-                self.session.headers.update({
-                    'Authorization': f'Bearer {self.token}',
-                    'Content-Type': 'application/json'
-                })
-                logger.info("Successfully authenticated with OAuth")
-                return True
-            else:
-                logger.error("OAuth authentication failed: No access token received")
-                return False
-                
-        except requests.exceptions.RequestException as e:
-            logger.error(f"OAuth authentication error: {str(e)}")
+        except ValueError as e:
+            # JSON decode error (non-JSON response)
+            logger.error(f"Authentication response parse error: {str(e)}")
             return False
-    
+
+    # REST SQL helpers
+    def _rest_submit_sql(self, sql: str) -> Optional[str]:
+        try:
+            url = f"{self.api_v3}/sql"
+            resp = self.session.post(url, json={"sql": sql})
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get('id')
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error submitting SQL: {str(e)}")
+            return None
+        except ValueError:
+            logger.error("Error parsing SQL submit response")
+            return None
+
+    def _rest_wait_job(self, job_id: str, timeout: int = 300, interval: int = 2) -> bool:
+        try:
+            url = f"{self.api_v3}/job/{job_id}"
+            elapsed = 0
+            last_state = None
+            while elapsed < timeout:
+                r = self.session.get(url)
+                r.raise_for_status()
+                info = r.json()
+                state = info.get('jobState')
+                if state != last_state:
+                    logger.info(f"Job {job_id} state: {state}")
+                    last_state = state
+                if state == 'COMPLETED':
+                    return True
+                if state in ('FAILED', 'CANCELED'):
+                    logger.error(f"Job {job_id} ended: {state} - {info.get('errorMessage')}")
+                    return False
+                import time as _t
+                _t.sleep(interval)
+                elapsed += interval
+            logger.error(f"Timeout waiting for job {job_id}")
+            return False
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error polling job {job_id}: {str(e)}")
+            return False
+
+    def _rest_fetch_results(self, job_id: str, limit: Optional[int] = None, page_limit: int = 500) -> pd.DataFrame:
+        try:
+            # First page to get counts
+            url = f"{self.api_v3}/job/{job_id}/results"
+            params = {"offset": 0, "limit": page_limit}
+            r = self.session.get(url, params=params)
+            r.raise_for_status()
+            data = r.json()
+            rows = data.get('rows', [])
+            total_rows = data.get('rowCount', len(rows))
+            if limit is not None:
+                total_rows = min(total_rows, limit)
+            all_rows = list(rows)
+            # Fetch remaining pages
+            offset = len(rows)
+            while offset < total_rows:
+                fetch_size = min(page_limit, total_rows - offset)
+                pr = self.session.get(url, params={"offset": offset, "limit": fetch_size})
+                pr.raise_for_status()
+                pdata = pr.json()
+                all_rows.extend(pdata.get('rows', []))
+                offset += fetch_size
+            # Convert to DataFrame
+            if not all_rows:
+                return pd.DataFrame()
+            # Normalize rows (list of dicts)
+            import pandas as _pd
+            return _pd.DataFrame(all_rows)
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching results for job {job_id}: {str(e)}")
+            return pd.DataFrame()
+        except ValueError:
+            logger.error("Error parsing results JSON")
+            return pd.DataFrame()
+
     def get_connection_engine(self):
         """Get SQLAlchemy engine for Flight SQL queries"""
         if self.engine is None:
-            protocol = "dremio+flight" if self.config.get('use_ssl', True) else "dremio+flight"
-            connection_string = f"{protocol}://{self.config['username']}:{self.config['password']}@{self.config['host']}:{self.config.get('port', 9047)}"
+            # Build query parameters for SSL/verification using dialect-expected names
+            params: Dict[str, Any] = {}
+            params['UseEncryption'] = 'true' if self.config.get('use_ssl', True) else 'false'
+            if self.config.get('use_ssl', True):
+                if not self.verify_ssl:
+                    params['DisableCertificateVerification'] = 'true'
+                elif self.cert_path and os.path.exists(self.cert_path):
+                    params['TrustedCertificates'] = self.cert_path
+                else:
+                    # Use system trust when verifying but no custom bundle
+                    params['useSystemTrustStore'] = 'true'
+            
+            query_str = urlencode(params)
+            protocol = "dremio+flight"
+            connection_string = (
+                f"{protocol}://{self.config['username']}:{self.config['password']}@"
+                f"{self.config['host']}:{self.flight_port}/?{query_str}"
+            )
             self.engine = create_engine(connection_string)
         return self.engine
     
     def execute_query(self, query: str, limit: Optional[int] = None) -> pd.DataFrame:
-        """Execute SQL query and return results as DataFrame"""
+        """Execute SQL query and return results as DataFrame via REST API"""
         try:
-            engine = self.get_connection_engine()
-            
-            # Add LIMIT if not present and limit is specified
-            if limit and "LIMIT" not in query.upper():
-                query = f"{query} LIMIT {limit}"
-            
-            with engine.connect() as conn:
-                result = conn.execute(text(query))
-                columns = result.keys()
-                rows = result.fetchall()
-                
-                return pd.DataFrame(rows, columns=columns)
-                
-        except SQLAlchemyError as e:
-            logger.error(f"SQL execution error: {str(e)}")
+            job_id = self._rest_submit_sql(query if (not limit or 'LIMIT' in (query or '').upper()) else f"{query} LIMIT {limit}")
+            if not job_id:
+                raise RuntimeError("Failed to submit SQL job")
+            if not self._rest_wait_job(job_id):
+                raise RuntimeError("SQL job did not complete successfully")
+            # If LIMIT was not in query and provided, fetch up to limit
+            effective_limit = None if (limit is None or 'LIMIT' in (query or '').upper()) else limit
+            df = self._rest_fetch_results(job_id, limit=effective_limit)
+            return df
+        except Exception as e:
+            logger.error(f"SQL execution error (REST): {str(e)}")
             raise
     
     def get_catalog_items(self, path: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get catalog items (datasets, folders, etc.) from Dremio"""
         try:
             if path:
-                url = f"{self.api_url}/catalog/by-path/{path}"
+                url = f"{self.api_v3}/catalog/by-path/{path}"
             else:
-                url = f"{self.api_url}/catalog"
+                url = f"{self.api_v3}/catalog"
             
             response = self.session.get(url)
             response.raise_for_status()
@@ -170,7 +255,7 @@ class DremioClient:
         """Get comprehensive metadata for a dataset"""
         try:
             # Get dataset info
-            dataset_url = f"{self.api_url}/catalog/by-path/{dataset_path}"
+            dataset_url = f"{self.api_v3}/catalog/by-path/{dataset_path}"
             response = self.session.get(dataset_url)
             response.raise_for_status()
             dataset_info = response.json()
@@ -200,7 +285,7 @@ class DremioClient:
         """Get wiki description for a dataset or folder"""
         try:
             # Try to get wiki content
-            wiki_url = f"{self.api_url}/catalog/by-path/{entity_path}/collaboration/wiki"
+            wiki_url = f"{self.api_v3}/catalog/by-path/{entity_path}/collaboration/wiki"
             response = self.session.get(wiki_url)
             
             if response.status_code == 200:
@@ -216,7 +301,7 @@ class DremioClient:
     def search_datasets(self, search_term: str) -> List[Dict[str, Any]]:
         """Search for datasets by name or description"""
         try:
-            search_url = f"{self.api_url}/catalog/search"
+            search_url = f"{self.api_v3}/catalog/search"
             params = {
                 "query": search_term,
                 "type": "dataset"
@@ -244,7 +329,7 @@ class DremioClient:
                 character_maximum_length,
                 numeric_precision,
                 numeric_scale
-            FROM INFORMATION_SCHEMA.COLUMNS 
+            FROM INFORMATION_SCHEMA."COLUMNS"
             WHERE table_name = '{table_path.split('.')[-1]}'
             ORDER BY ordinal_position
             """
@@ -258,16 +343,22 @@ class DremioClient:
     def list_tables(self, source: Optional[str] = None, schema: Optional[str] = None) -> List[Tuple[str, str]]:
         """List all available tables with optional filtering"""
         try:
-            query = "SELECT table_schema, table_name FROM INFORMATION_SCHEMA.TABLES WHERE table_type = 'BASE TABLE'"
-            params = []
+            # Apply defaults if not explicitly provided
+            if source is None and self.default_source:
+                source = self.default_source
+            if schema is None and self.default_schema:
+                schema = self.default_schema
             
-            if source:
-                query += " AND table_schema LIKE ?"
-                params.append(f"{source}%")
+            query = "SELECT table_schema, table_name FROM INFORMATION_SCHEMA.\"TABLES\" WHERE table_type IN ('TABLE','VIEW')"
             
-            if schema:
-                query += " AND table_schema = ?"
-                params.append(schema)
+            if source and schema:
+                # Case-insensitive match on fully-qualified schema
+                fq_schema = f"{source}.{schema}"
+                query += f" AND LOWER(table_schema) = LOWER('{fq_schema}')"
+            elif source:
+                query += f" AND LOWER(table_schema) LIKE LOWER('{source}.%')"
+            elif schema:
+                query += f" AND LOWER(table_schema) LIKE LOWER('%.{schema}')"
             
             query += " ORDER BY table_schema, table_name"
             
@@ -290,7 +381,7 @@ class DremioClient:
     def get_reflection_info(self, dataset_path: str) -> List[Dict[str, Any]]:
         """Get reflection information for a dataset"""
         try:
-            reflections_url = f"{self.api_url}/catalog/by-path/{dataset_path}/reflection"
+            reflections_url = f"{self.api_v3}/catalog/by-path/{dataset_path}/reflection"
             response = self.session.get(reflections_url)
             
             if response.status_code == 200:
@@ -305,7 +396,7 @@ class DremioClient:
     def get_job_history(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Get recent job history"""
         try:
-            jobs_url = f"{self.api_url}/jobs"
+            jobs_url = f"{self.api_v3}/jobs"
             params = {"limit": limit}
             
             response = self.session.get(jobs_url, params=params)

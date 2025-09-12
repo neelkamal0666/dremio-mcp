@@ -15,7 +15,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-import openai
+from openai import OpenAI
 from dremio_client import DremioClient
 
 logger = logging.getLogger(__name__)
@@ -25,11 +25,10 @@ class DremioAIAgent:
     
     def __init__(self, dremio_client: DremioClient, openai_api_key: Optional[str] = None):
         self.dremio_client = dremio_client
-        self.openai_client = None
+        self.openai_client: Optional[OpenAI] = None
         
         if openai_api_key:
-            openai.api_key = openai_api_key
-            self.openai_client = openai
+            self.openai_client = OpenAI(api_key=openai_api_key)
         
         # Cache for metadata to avoid repeated API calls
         self.metadata_cache = {}
@@ -37,8 +36,7 @@ class DremioAIAgent:
         
     def set_openai_key(self, api_key: str):
         """Set OpenAI API key for enhanced natural language processing"""
-        openai.api_key = api_key
-        self.openai_client = openai
+        self.openai_client = OpenAI(api_key=api_key)
     
     async def process_query(self, user_query: str) -> Dict[str, Any]:
         """Process a natural language query and return results"""
@@ -273,41 +271,37 @@ class DremioAIAgent:
             }
     
     async def _generate_sql_with_ai(self, query: str, intent: Dict[str, Any]) -> Optional[str]:
-        """Generate SQL query using OpenAI API"""
+        """Generate SQL query using OpenAI API (>=1.0 client)"""
         try:
+            if not self.openai_client:
+                return None
             # Get available tables for context
             tables = self.dremio_client.list_tables()
             table_context = "\n".join([f"- {schema}.{table}" for schema, table in tables[:20]])  # Limit to first 20
             
-            prompt = f"""
-            You are a SQL expert for Dremio. Based on the user's natural language query, generate an appropriate SQL query.
-            
-            Available tables:
-            {table_context}
-            
-            User query: "{query}"
-            
-            Intent analysis: {json.dumps(intent, indent=2)}
-            
-            Generate a SQL query that answers the user's question. If the query involves aggregations, include appropriate GROUP BY clauses.
-            Return only the SQL query, no explanations.
-            """
-            
-            response = await openai.ChatCompletion.acreate(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=500,
-                temperature=0.1
+            prompt = (
+                "You are a SQL expert for Dremio. Based on the user's natural language query, "
+                "generate an appropriate SQL query.\n\n"
+                f"Available tables:\n{table_context}\n\n"
+                f"User query: \"{query}\"\n\n"
+                f"Intent analysis: {json.dumps(intent, indent=2)}\n\n"
+                "Generate a SQL query that answers the user's question. If the query involves aggregations, "
+                "include appropriate GROUP BY clauses. Return only the SQL query, no explanations."
             )
             
-            sql_query = response.choices[0].message.content.strip()
+            def _call_openai():
+                return self.openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=500,
+                    temperature=0.1,
+                )
             
-            # Clean up the query
+            response = await asyncio.to_thread(_call_openai)
+            sql_query = response.choices[0].message.content.strip()
             sql_query = re.sub(r'^```sql\s*', '', sql_query)
             sql_query = re.sub(r'\s*```$', '', sql_query)
-            
             return sql_query
-            
         except Exception as e:
             logger.warning(f"AI SQL generation failed: {str(e)}")
             return None
@@ -367,21 +361,22 @@ class DremioAIAgent:
             return "AI explanation not available. Please set OpenAI API key."
         
         try:
-            prompt = f"""
-            Explain this SQL query in simple, natural language:
-            
-            {sql_query}
-            
-            Provide a clear explanation of what this query does, what data it retrieves, and any important details about the results.
-            """
-            
-            response = await openai.ChatCompletion.acreate(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=300,
-                temperature=0.3
+            prompt = (
+                "Explain this SQL query in simple, natural language:\n\n"
+                f"{sql_query}\n\n"
+                "Provide a clear explanation of what this query does, what data it retrieves, "
+                "and any important details about the results."
             )
             
+            def _call_openai():
+                return self.openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=300,
+                    temperature=0.3,
+                )
+            
+            response = await asyncio.to_thread(_call_openai)
             return response.choices[0].message.content.strip()
             
         except Exception as e:
