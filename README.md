@@ -192,6 +192,32 @@ Get a sample of data from a table for exploration.
 }
 ```
 
+### `get_wiki_metadata`
+Get comprehensive wiki metadata for a table including structured documentation.
+
+**Parameters:**
+- `table_path` (required): Full path to the table
+
+**Example:**
+```json
+{
+  "table_path": "sales.customers"
+}
+```
+
+### `search_wiki_content`
+Search for tables with wiki content matching a search term.
+
+**Parameters:**
+- `search_term` (required): Search term to find in wiki content
+
+**Example:**
+```json
+{
+  "search_term": "customer demographics"
+}
+```
+
 ## Integration with AI Assistants
 
 ### Claude Desktop Integration
@@ -254,6 +280,44 @@ When Anthropic API key is configured, the agent can:
 - Suggest query optimizations
 - Explain SQL queries in natural language
 - Provide data insights and analysis
+
+### Wiki Metadata Integration
+
+The system leverages Dremio's wiki feature for rich metadata:
+
+- **Structured Documentation**: Parse wiki content for business context, column descriptions, and usage notes
+- **Smart Search**: Find tables based on wiki content and business terms
+- **Enhanced AI Context**: Use wiki metadata to generate more accurate SQL queries
+- **Comprehensive Metadata**: Access business purpose, data sources, ownership, and quality notes
+
+#### Wiki Content Structure
+
+The system automatically parses wiki content with this structure:
+
+```markdown
+# Table Name
+Brief description of the table.
+
+## Business Purpose
+Why this data exists and how it's used.
+
+## Data Source
+**Source:** System name
+**Update Frequency:** How often data is updated
+**Owner:** Team responsible
+
+## Column Descriptions
+- column_name: Description of what this column contains
+- another_column: Another column description
+
+## Usage Notes
+Important information about how to use this data.
+
+## Data Quality Notes
+Known issues or limitations with the data.
+```
+
+See `wiki_examples.md` for detailed examples and best practices.
 
 ### Metadata Caching
 
@@ -356,6 +420,11 @@ python test_setup.py
 Test Anthropic Claude integration specifically:
 ```bash
 python test_anthropic.py
+```
+
+Test wiki metadata functionality:
+```bash
+python test_wiki.py
 ```
 
 Run development tests with pytest:

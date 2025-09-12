@@ -200,6 +200,34 @@ class DremioMCP:
                             },
                             "required": ["table_path"]
                         }
+                    ),
+                    Tool(
+                        name="get_wiki_metadata",
+                        description="Get comprehensive wiki metadata for a table including structured documentation",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "table_path": {
+                                    "type": "string",
+                                    "description": "Full path to the table (e.g., 'source.schema.table')"
+                                }
+                            },
+                            "required": ["table_path"]
+                        }
+                    ),
+                    Tool(
+                        name="search_wiki_content",
+                        description="Search for tables with wiki content matching a search term",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "search_term": {
+                                    "type": "string",
+                                    "description": "Search term to find in wiki content"
+                                }
+                            },
+                            "required": ["search_term"]
+                        }
                     )
                 ]
             )
@@ -220,6 +248,10 @@ class DremioMCP:
                     return await self._search_tables(arguments)
                 elif name == "get_data_sample":
                     return await self._get_data_sample(arguments)
+                elif name == "get_wiki_metadata":
+                    return await self._get_wiki_metadata(arguments)
+                elif name == "search_wiki_content":
+                    return await self._search_wiki_content(arguments)
                 else:
                     return CallToolResult(
                         content=[TextContent(type="text", text=f"Unknown tool: {name}")]
@@ -426,6 +458,100 @@ class DremioMCP:
         except Exception as e:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"Error getting sample data: {str(e)}")]
+            )
+    
+    async def _get_wiki_metadata(self, arguments: Dict[str, Any]) -> CallToolResult:
+        """Get comprehensive wiki metadata for a table"""
+        table_path = arguments.get("table_path", "")
+        
+        try:
+            wiki_metadata = self.client.get_wiki_metadata(table_path)
+            
+            if not wiki_metadata:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"No wiki documentation found for table '{table_path}'")]
+                )
+            
+            # Format the response
+            result_text = f"Wiki Documentation for {table_path}:\n\n"
+            
+            if wiki_metadata.get('parsed_metadata'):
+                parsed = wiki_metadata['parsed_metadata']
+                
+                if parsed.get('description'):
+                    result_text += f"Description: {parsed['description']}\n\n"
+                
+                if parsed.get('business_purpose'):
+                    result_text += f"Business Purpose: {parsed['business_purpose']}\n\n"
+                
+                if parsed.get('data_source'):
+                    result_text += f"Data Source: {parsed['data_source']}\n\n"
+                
+                if parsed.get('owner'):
+                    result_text += f"Owner: {parsed['owner']}\n\n"
+                
+                if parsed.get('update_frequency'):
+                    result_text += f"Update Frequency: {parsed['update_frequency']}\n\n"
+                
+                if parsed.get('tags'):
+                    result_text += f"Tags: {', '.join(parsed['tags'])}\n\n"
+                
+                if parsed.get('column_descriptions'):
+                    result_text += "Column Descriptions:\n"
+                    for col, desc in parsed['column_descriptions'].items():
+                        result_text += f"  - {col}: {desc}\n"
+                    result_text += "\n"
+                
+                if parsed.get('usage_notes'):
+                    result_text += f"Usage Notes: {parsed['usage_notes']}\n\n"
+                
+                if parsed.get('data_quality_notes'):
+                    result_text += f"Data Quality Notes: {parsed['data_quality_notes']}\n\n"
+            
+            if wiki_metadata.get('raw_text'):
+                result_text += f"Raw Wiki Content:\n{wiki_metadata['raw_text']}\n\n"
+            
+            if wiki_metadata.get('last_modified'):
+                result_text += f"Last Modified: {wiki_metadata['last_modified']}\n"
+            
+            if wiki_metadata.get('author'):
+                result_text += f"Author: {wiki_metadata['author']}\n"
+            
+            return CallToolResult(
+                content=[TextContent(type="text", text=result_text)]
+            )
+            
+        except Exception as e:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"Error getting wiki metadata: {str(e)}")]
+            )
+    
+    async def _search_wiki_content(self, arguments: Dict[str, Any]) -> CallToolResult:
+        """Search for tables with wiki content matching a search term"""
+        search_term = arguments.get("search_term", "")
+        
+        try:
+            wiki_results = self.client.search_wiki_content(search_term)
+            
+            if not wiki_results:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"No tables found with wiki content matching '{search_term}'")]
+                )
+            
+            result_text = f"Found {len(wiki_results)} tables with wiki content matching '{search_term}':\n\n"
+            
+            for result in wiki_results:
+                result_text += f"**{result['path']}**\n"
+                result_text += f"Type: {result['type']}\n"
+                result_text += f"Wiki snippet: {result['wiki_snippet']}\n\n"
+            
+            return CallToolResult(
+                content=[TextContent(type="text", text=result_text)]
+            )
+            
+        except Exception as e:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"Error searching wiki content: {str(e)}")]
             )
     
     async def run(self):

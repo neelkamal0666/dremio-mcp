@@ -298,6 +298,169 @@ class DremioClient:
             logger.warning(f"Could not get wiki description: {str(e)}")
             return None
     
+    def get_wiki_metadata(self, entity_path: str) -> Dict[str, Any]:
+        """Get comprehensive wiki metadata including tags, descriptions, and custom fields"""
+        try:
+            wiki_url = f"{self.api_v3}/catalog/by-path/{entity_path}/collaboration/wiki"
+            response = self.session.get(wiki_url)
+            
+            if response.status_code == 200:
+                wiki_data = response.json()
+                
+                # Parse wiki content for structured metadata
+                wiki_text = wiki_data.get('text', '')
+                parsed_metadata = self._parse_wiki_metadata(wiki_text)
+                
+                return {
+                    'raw_text': wiki_text,
+                    'parsed_metadata': parsed_metadata,
+                    'last_modified': wiki_data.get('version', {}).get('createdAt'),
+                    'author': wiki_data.get('version', {}).get('author')
+                }
+            else:
+                return {}
+                
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Could not get wiki metadata: {str(e)}")
+            return {}
+    
+    def _parse_wiki_metadata(self, wiki_text: str) -> Dict[str, Any]:
+        """Parse wiki text to extract structured metadata"""
+        metadata = {
+            'description': '',
+            'business_purpose': '',
+            'data_source': '',
+            'update_frequency': '',
+            'owner': '',
+            'tags': [],
+            'column_descriptions': {},
+            'usage_notes': '',
+            'data_quality_notes': ''
+        }
+        
+        if not wiki_text:
+            return metadata
+        
+        lines = wiki_text.split('\n')
+        current_section = None
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Parse section headers
+            if line.startswith('# '):
+                current_section = 'description'
+                metadata['description'] = line[2:].strip()
+            elif line.startswith('## '):
+                section_name = line[3:].strip().lower()
+                if 'purpose' in section_name:
+                    current_section = 'business_purpose'
+                elif 'source' in section_name:
+                    current_section = 'data_source'
+                elif 'frequency' in section_name or 'update' in section_name:
+                    current_section = 'update_frequency'
+                elif 'owner' in section_name:
+                    current_section = 'owner'
+                elif 'usage' in section_name:
+                    current_section = 'usage_notes'
+                elif 'quality' in section_name:
+                    current_section = 'data_quality_notes'
+                elif 'columns' in section_name:
+                    current_section = 'column_descriptions'
+                else:
+                    current_section = None
+            elif line.startswith('**') and line.endswith('**'):
+                # Bold text - could be field names
+                field_name = line[2:-2].strip().lower()
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    key = key.replace('**', '').strip().lower()
+                    value = value.replace('**', '').strip()
+                    
+                    if 'description' in key:
+                        metadata['description'] = value
+                    elif 'purpose' in key:
+                        metadata['business_purpose'] = value
+                    elif 'source' in key:
+                        metadata['data_source'] = value
+                    elif 'frequency' in key or 'update' in key:
+                        metadata['update_frequency'] = value
+                    elif 'owner' in key:
+                        metadata['owner'] = value
+            elif line.startswith('- ') or line.startswith('* '):
+                # List items - could be tags or column descriptions
+                item = line[2:].strip()
+                if current_section == 'column_descriptions':
+                    # Parse column descriptions like "column_name: description"
+                    if ':' in item:
+                        col_name, col_desc = item.split(':', 1)
+                        metadata['column_descriptions'][col_name.strip()] = col_desc.strip()
+                elif 'tag' in item.lower() or item.startswith('#'):
+                    # Extract tags
+                    tag = item.replace('#', '').strip()
+                    if tag:
+                        metadata['tags'].append(tag)
+            elif line and current_section and current_section != 'column_descriptions':
+                # Regular text content
+                if metadata[current_section]:
+                    metadata[current_section] += ' ' + line
+                else:
+                    metadata[current_section] = line
+        
+        return metadata
+    
+    def search_wiki_content(self, search_term: str) -> List[Dict[str, Any]]:
+        """Search for entities with wiki content matching the search term"""
+        try:
+            # Get all catalog items
+            catalog_items = self.get_catalog_items()
+            matching_items = []
+            
+            for item in catalog_items:
+                entity_path = item.get('path', [])
+                if not entity_path:
+                    continue
+                
+                full_path = '.'.join(entity_path)
+                wiki_metadata = self.get_wiki_metadata(full_path)
+                
+                if wiki_metadata and wiki_metadata.get('raw_text'):
+                    wiki_text = wiki_metadata['raw_text'].lower()
+                    if search_term.lower() in wiki_text:
+                        matching_items.append({
+                            'path': full_path,
+                            'name': item.get('name', ''),
+                            'type': item.get('type', ''),
+                            'wiki_snippet': self._extract_snippet(wiki_metadata['raw_text'], search_term),
+                            'wiki_metadata': wiki_metadata
+                        })
+            
+            return matching_items
+            
+        except Exception as e:
+            logger.error(f"Error searching wiki content: {str(e)}")
+            return []
+    
+    def _extract_snippet(self, text: str, search_term: str, context_length: int = 100) -> str:
+        """Extract a snippet of text around the search term"""
+        text_lower = text.lower()
+        term_lower = search_term.lower()
+        
+        index = text_lower.find(term_lower)
+        if index == -1:
+            return text[:context_length] + "..." if len(text) > context_length else text
+        
+        start = max(0, index - context_length // 2)
+        end = min(len(text), index + len(search_term) + context_length // 2)
+        
+        snippet = text[start:end]
+        if start > 0:
+            snippet = "..." + snippet
+        if end < len(text):
+            snippet = snippet + "..."
+        
+        return snippet
+    
     def search_datasets(self, search_term: str) -> List[Dict[str, Any]]:
         """Search for datasets by name or description"""
         try:

@@ -170,11 +170,15 @@ class DremioAIAgent:
                 sql_query = self._generate_sql_heuristic(query, intent)
             
             if not sql_query:
-                return {
-                    'success': False,
-                    'error': "Could not generate SQL query from your question",
-                    'suggestion': "Try being more specific about the table and columns you want to query"
-                }
+                # Try heuristic as fallback even if AI is available
+                sql_query = self._generate_sql_heuristic(query, intent)
+                
+                if not sql_query:
+                    return {
+                        'success': False,
+                        'error': "Could not generate SQL query from your question",
+                        'suggestion': "Try being more specific about the table and columns you want to query. For example: 'How many records are in the accounts table?'"
+                    }
             
             # Execute the query
             result_df = self.dremio_client.execute_query(sql_query)
@@ -191,7 +195,7 @@ class DremioAIAgent:
             return {
                 'success': False,
                 'error': f"Error executing query: {str(e)}",
-                'suggestion': "Please check your table names and try again"
+                'suggestion': "Please check your table names and try again. You can also try: 'show me all tables' to see available tables"
             }
     
     async def _handle_schema_inquiry(self, query: str, intent: Dict[str, Any]) -> Dict[str, Any]:
@@ -254,19 +258,107 @@ class DremioAIAgent:
         """Handle metadata requests including wiki descriptions"""
         try:
             if not intent['entities']:
-                return {
-                    'success': False,
-                    'error': "Please specify which table you want metadata for",
-                    'suggestion': "Try: 'Tell me about table_name' or 'What is the description of source.schema.table'"
-                }
+                # Try to search wiki content for relevant tables
+                query_lower = query.lower()
+                
+                # Search wiki content for matching terms
+                wiki_results = self.dremio_client.search_wiki_content(query)
+                
+                if wiki_results:
+                    # Format wiki search results
+                    result_text = f"Found {len(wiki_results)} tables with relevant wiki documentation:\n\n"
+                    for result in wiki_results[:5]:  # Show top 5 results
+                        result_text += f"**{result['path']}**\n"
+                        result_text += f"Type: {result['type']}\n"
+                        result_text += f"Wiki snippet: {result['wiki_snippet']}\n\n"
+                    
+                    return {
+                        'success': True,
+                        'message': result_text,
+                        'wiki_results': wiki_results,
+                        'suggestion': f"Try: 'Tell me about {wiki_results[0]['path']}' for detailed information"
+                    }
+                
+                # Fallback to common table name matching
+                potential_tables = []
+                common_table_names = ['accounts', 'customers', 'users', 'orders', 'products', 'sales', 'demographics', 'profile', 'data']
+                
+                for table_name in common_table_names:
+                    if table_name in query_lower:
+                        potential_tables.append(table_name)
+                
+                if potential_tables:
+                    return {
+                        'success': False,
+                        'error': f"Please specify which table you want metadata for. I found these potential matches: {', '.join(potential_tables)}",
+                        'suggestion': f"Try: 'Tell me about {potential_tables[0]}' or 'What is the description of {potential_tables[0]} table'"
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'error': "Please specify which table you want metadata for",
+                        'suggestion': "Try: 'Tell me about table_name' or 'What is the description of source.schema.table'"
+                    }
             
             table_path = intent['entities'][0]
-            metadata = self.dremio_client.get_dataset_metadata(table_path)
+            
+            # Get comprehensive metadata including wiki
+            basic_metadata = self.dremio_client.get_dataset_metadata(table_path)
+            wiki_metadata = self.dremio_client.get_wiki_metadata(table_path)
+            
+            # Combine metadata
+            combined_metadata = {
+                'table': table_path,
+                'basic_metadata': basic_metadata,
+                'wiki_metadata': wiki_metadata
+            }
+            
+            # Format response with wiki information
+            response_text = f"**Metadata for {table_path}**\n\n"
+            
+            if wiki_metadata and wiki_metadata.get('parsed_metadata'):
+                parsed = wiki_metadata['parsed_metadata']
+                
+                if parsed.get('description'):
+                    response_text += f"**Description:** {parsed['description']}\n\n"
+                
+                if parsed.get('business_purpose'):
+                    response_text += f"**Business Purpose:** {parsed['business_purpose']}\n\n"
+                
+                if parsed.get('data_source'):
+                    response_text += f"**Data Source:** {parsed['data_source']}\n\n"
+                
+                if parsed.get('owner'):
+                    response_text += f"**Owner:** {parsed['owner']}\n\n"
+                
+                if parsed.get('update_frequency'):
+                    response_text += f"**Update Frequency:** {parsed['update_frequency']}\n\n"
+                
+                if parsed.get('tags'):
+                    response_text += f"**Tags:** {', '.join(parsed['tags'])}\n\n"
+                
+                if parsed.get('column_descriptions'):
+                    response_text += "**Column Descriptions:**\n"
+                    for col, desc in parsed['column_descriptions'].items():
+                        response_text += f"- {col}: {desc}\n"
+                    response_text += "\n"
+                
+                if parsed.get('usage_notes'):
+                    response_text += f"**Usage Notes:** {parsed['usage_notes']}\n\n"
+                
+                if parsed.get('data_quality_notes'):
+                    response_text += f"**Data Quality Notes:** {parsed['data_quality_notes']}\n\n"
+            
+            elif basic_metadata.get('wiki_description'):
+                response_text += f"**Description:** {basic_metadata['wiki_description']}\n\n"
+            
+            if basic_metadata.get('sample_data'):
+                response_text += f"**Sample Data:** {len(basic_metadata['sample_data'])} rows available\n\n"
             
             return {
                 'success': True,
-                'table': table_path,
-                'metadata': metadata
+                'formatted_response': response_text,
+                'metadata': combined_metadata
             }
             
         except Exception as e:
@@ -280,18 +372,57 @@ class DremioAIAgent:
         try:
             if not self.anthropic_client:
                 return None
-            # Get available tables for context
-            tables = self.dremio_client.list_tables()
-            table_context = "\n".join([f"- {schema}.{table}" for schema, table in tables[:20]])  # Limit to first 20
+            
+            # Try to get available tables and wiki context, but don't fail if it doesn't work
+            table_context = ""
+            wiki_context = ""
+            
+            try:
+                if self.dremio_client:
+                    tables = self.dremio_client.list_tables()
+                    table_context = "\n".join([f"- {schema}.{table}" for schema, table in tables[:20]])  # Limit to first 20
+                    table_context = f"Available tables:\n{table_context}\n\n"
+                    
+                    # Try to get wiki context for relevant tables
+                    query_lower = query.lower()
+                    relevant_tables = []
+                    for schema, table in tables[:10]:  # Check first 10 tables
+                        if any(term in table.lower() or term in schema.lower() for term in query_lower.split()):
+                            relevant_tables.append(f"{schema}.{table}")
+                    
+                    if relevant_tables:
+                        wiki_context = "Relevant table documentation:\n"
+                        for table_path in relevant_tables[:3]:  # Limit to 3 tables
+                            wiki_metadata = self.dremio_client.get_wiki_metadata(table_path)
+                            if wiki_metadata and wiki_metadata.get('parsed_metadata'):
+                                parsed = wiki_metadata['parsed_metadata']
+                                wiki_context += f"\n{table_path}:\n"
+                                if parsed.get('description'):
+                                    wiki_context += f"  Description: {parsed['description']}\n"
+                                if parsed.get('business_purpose'):
+                                    wiki_context += f"  Purpose: {parsed['business_purpose']}\n"
+                                if parsed.get('column_descriptions'):
+                                    wiki_context += "  Key columns:\n"
+                                    for col, desc in list(parsed['column_descriptions'].items())[:3]:
+                                        wiki_context += f"    - {col}: {desc}\n"
+                        wiki_context += "\n"
+                else:
+                    table_context = "Note: No table context available. Use common table names like 'accounts', 'customers', 'orders', etc.\n\n"
+            except Exception as e:
+                logger.warning(f"Could not get table context: {str(e)}")
+                table_context = "Note: Could not retrieve table list. Use common table names like 'accounts', 'customers', 'orders', etc.\n\n"
             
             prompt = (
                 "You are a SQL expert for Dremio. Based on the user's natural language query, "
                 "generate an appropriate SQL query.\n\n"
-                f"Available tables:\n{table_context}\n\n"
+                f"{table_context}"
+                f"{wiki_context}"
                 f"User query: \"{query}\"\n\n"
                 f"Intent analysis: {json.dumps(intent, indent=2)}\n\n"
-                "Generate a SQL query that answers the user's question. If the query involves aggregations, "
-                "include appropriate GROUP BY clauses. Return only the SQL query, no explanations."
+                "Generate a SQL query that answers the user's question. Use the table documentation above "
+                "to understand column names and business context. If the query involves aggregations, "
+                "include appropriate GROUP BY clauses. If you don't know the exact table name, use a reasonable guess "
+                "based on the query context and available tables. Return only the SQL query, no explanations."
             )
             
             def _call_anthropic():
@@ -315,20 +446,42 @@ class DremioAIAgent:
         """Generate SQL query using heuristic rules"""
         query_lower = query.lower()
         
+        # Extract potential table names from common patterns
+        potential_table = None
+        
+        # Look for common table names in the query
+        common_tables = ['accounts', 'customers', 'users', 'orders', 'products', 'sales', 'demographics', 'profile', 'data']
+        for table in common_tables:
+            if table in query_lower:
+                potential_table = table
+                break
+        
+        # If we have entities from intent analysis, use those
+        if intent['entities']:
+            potential_table = intent['entities'][0]
+        
         # Simple heuristics for common queries
         if 'show me' in query_lower or 'display' in query_lower:
-            if intent['entities']:
-                table = intent['entities'][0]
-                return f"SELECT * FROM {table} LIMIT 100"
+            if potential_table:
+                return f"SELECT * FROM {potential_table} LIMIT 100"
+            else:
+                return "SELECT * FROM accounts LIMIT 100"  # Default fallback
         
         if 'count' in query_lower or 'how many' in query_lower:
-            if intent['entities']:
-                table = intent['entities'][0]
-                return f"SELECT COUNT(*) as count FROM {table}"
+            if potential_table:
+                return f"SELECT COUNT(*) as count FROM {potential_table}"
+            else:
+                return "SELECT COUNT(*) as count FROM accounts"  # Default fallback
         
-        if 'list' in query_lower and intent['entities']:
-            table = intent['entities'][0]
-            return f"SELECT * FROM {table} LIMIT 50"
+        if 'list' in query_lower:
+            if potential_table:
+                return f"SELECT * FROM {potential_table} LIMIT 50"
+            else:
+                return "SELECT * FROM accounts LIMIT 50"  # Default fallback
+        
+        # If we have a potential table but no specific pattern, do a basic select
+        if potential_table:
+            return f"SELECT * FROM {potential_table} LIMIT 10"
         
         return None
     

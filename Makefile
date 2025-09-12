@@ -24,6 +24,12 @@ test-anthropic: ## Test Anthropic Claude integration
 test-intent: ## Test intent analysis
 	python test_intent.py
 
+test-queries: ## Test query processing
+	python test_queries.py
+
+test-wiki: ## Test wiki metadata functionality
+	python test_wiki.py
+
 test-connection: ## Test Dremio connection
 	python cli.py test-connection
 
