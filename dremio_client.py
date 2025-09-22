@@ -284,14 +284,21 @@ class DremioClient:
     def get_wiki_description(self, entity_path: str) -> Optional[str]:
         """Get wiki description for a dataset or folder"""
         try:
-            # Try to get wiki content
-            wiki_url = f"{self.api_v3}/catalog/by-path/{entity_path}/collaboration/wiki"
+            # First get the entity ID from the path
+            entity_id = self._get_entity_id_by_path(entity_path)
+            if not entity_id:
+                logger.warning(f"Could not find entity ID for path: {entity_path}")
+                return None
+            
+            # Try to get wiki content using entity ID
+            wiki_url = f"{self.api_v3}/catalog/{entity_id}/collaboration/wiki"
             response = self.session.get(wiki_url)
             
             if response.status_code == 200:
                 wiki_data = response.json()
                 return wiki_data.get('text', '')
             else:
+                logger.debug(f"Wiki not found for {entity_path} (ID: {entity_id}): {response.status_code}")
                 return None
                 
         except requests.exceptions.RequestException as e:
@@ -301,7 +308,14 @@ class DremioClient:
     def get_wiki_metadata(self, entity_path: str) -> Dict[str, Any]:
         """Get comprehensive wiki metadata including tags, descriptions, and custom fields"""
         try:
-            wiki_url = f"{self.api_v3}/catalog/by-path/{entity_path}/collaboration/wiki"
+            # First get the entity ID from the path
+            entity_id = self._get_entity_id_by_path(entity_path)
+            if not entity_id:
+                logger.warning(f"Could not find entity ID for path: {entity_path}")
+                return {}
+            
+            # Try to get wiki content using entity ID
+            wiki_url = f"{self.api_v3}/catalog/{entity_id}/collaboration/wiki"
             response = self.session.get(wiki_url)
             
             if response.status_code == 200:
@@ -318,11 +332,29 @@ class DremioClient:
                     'author': wiki_data.get('version', {}).get('author')
                 }
             else:
+                logger.debug(f"Wiki not found for {entity_path} (ID: {entity_id}): {response.status_code}")
                 return {}
                 
         except requests.exceptions.RequestException as e:
             logger.warning(f"Could not get wiki metadata: {str(e)}")
             return {}
+    
+    def _get_entity_id_by_path(self, entity_path: str) -> Optional[str]:
+        """Get entity ID from entity path"""
+        try:
+            catalog_url = f"{self.api_v3}/catalog/by-path/{entity_path}"
+            response = self.session.get(catalog_url)
+            
+            if response.status_code == 200:
+                catalog_data = response.json()
+                return catalog_data.get('id')
+            else:
+                logger.debug(f"Could not find entity for path {entity_path}: {response.status_code}")
+                return None
+                
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Could not get entity ID for path {entity_path}: {str(e)}")
+            return None
     
     def _parse_wiki_metadata(self, wiki_text: str) -> Dict[str, Any]:
         """Parse wiki text to extract structured metadata"""
