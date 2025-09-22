@@ -435,7 +435,7 @@ class DremioAIAgent:
             
             def _call_anthropic():
                 return self.anthropic_client.messages.create(
-                    model="claude-3-sonnet-20240229",
+                    model="claude-3-5-sonnet-20241022",
                     max_tokens=500,
                     temperature=0.1,
                     messages=[{"role": "user", "content": prompt}]
@@ -594,7 +594,7 @@ class DremioAIAgent:
             
             def _call_anthropic():
                 return self.anthropic_client.messages.create(
-                    model="claude-3-sonnet-20240229",
+                    model="claude-3-5-sonnet-20241022",
                     max_tokens=300,
                     temperature=0.3,
                     messages=[{"role": "user", "content": prompt}]

@@ -32,7 +32,7 @@ async def test_anthropic_connection():
         # Test API call
         def _call_anthropic():
             return client.messages.create(
-                model="claude-3-sonnet-20240229",
+                model="claude-3-5-sonnet-20241022",
                 max_tokens=100,
                 temperature=0.1,
                 messages=[{"role": "user", "content": "Say 'Hello, world!'"}]
@@ -44,6 +44,12 @@ async def test_anthropic_connection():
     except Exception as e:
         print(f"❌ API call failed: {str(e)}")
         print(f"Error type: {type(e).__name__}")
+        print(f"Error details: {e}")
+        
+        # Try to get more specific error information
+        if hasattr(e, 'response'):
+            print(f"Response status: {e.response.status_code if hasattr(e.response, 'status_code') else 'N/A'}")
+            print(f"Response text: {e.response.text if hasattr(e.response, 'text') else 'N/A'}")
 
 if __name__ == "__main__":
     asyncio.run(test_anthropic_connection())
