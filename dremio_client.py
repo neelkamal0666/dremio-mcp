@@ -312,6 +312,12 @@ class DremioClient:
             entity_id = self._get_entity_id_by_path(entity_path)
             if not entity_id:
                 logger.warning(f"Could not find entity ID for path: {entity_path}")
+                
+                # For DataMesh tables, try alternative approaches
+                if 'DataMesh' in entity_path or 'datamesh' in entity_path.lower():
+                    logger.debug(f"Trying alternative approach for DataMesh table: {entity_path}")
+                    return self._get_wiki_metadata_alternative(entity_path)
+                
                 return {}
             
             # Try to get wiki content using entity ID
@@ -339,8 +345,54 @@ class DremioClient:
             logger.warning(f"Could not get wiki metadata: {str(e)}")
             return {}
     
+    def _get_wiki_metadata_alternative(self, entity_path: str) -> Dict[str, Any]:
+        """Alternative approach for getting wiki metadata when entity ID resolution fails"""
+        try:
+            # Try to find the entity in the catalog by searching all items
+            search_url = f"{self.api_v3}/catalog"
+            response = self.session.get(search_url)
+            
+            if response.status_code == 200:
+                catalog_items = response.json()
+                
+                # Extract table name for matching
+                path_parts = entity_path.split('.')
+                table_name = path_parts[-1] if path_parts else entity_path
+                
+                # Look for any item with matching name (case-insensitive)
+                for item in catalog_items.get('data', []):
+                    item_name = item.get('name', '')
+                    if item_name.lower() == table_name.lower():
+                        entity_id = item.get('id')
+                        if entity_id:
+                            logger.debug(f"Found alternative entity ID for {entity_path}: {entity_id}")
+                            
+                            # Try to get wiki content
+                            wiki_url = f"{self.api_v3}/catalog/{entity_id}/collaboration/wiki"
+                            wiki_response = self.session.get(wiki_url)
+                            
+                            if wiki_response.status_code == 200:
+                                wiki_data = wiki_response.json()
+                                wiki_text = wiki_data.get('text', '')
+                                
+                                if wiki_text:
+                                    parsed_metadata = self._parse_wiki_metadata(wiki_text)
+                                    return {
+                                        'raw_text': wiki_text,
+                                        'parsed_metadata': parsed_metadata,
+                                        'last_modified': wiki_data.get('version', {}).get('createdAt'),
+                                        'author': wiki_data.get('version', {}).get('author')
+                                    }
+            
+            logger.debug(f"No wiki content found for {entity_path} using alternative approach")
+            return {}
+            
+        except Exception as e:
+            logger.warning(f"Alternative wiki metadata approach failed: {str(e)}")
+            return {}
+    
     def _get_entity_id_by_path(self, entity_path: str) -> Optional[str]:
-        """Get entity ID from entity path using catalog search"""
+        """Get entity ID from entity path using multiple approaches"""
         try:
             # First try the direct by-path approach
             catalog_url = f"{self.api_v3}/catalog/by-path/{entity_path}"
@@ -351,6 +403,25 @@ class DremioClient:
                 return catalog_data.get('id')
             else:
                 logger.debug(f"Direct by-path failed for {entity_path}: {response.status_code}")
+                
+                # Try different path formats for by-path
+                path_formats = [
+                    entity_path,
+                    entity_path.replace('.', '/'),
+                    entity_path.replace('.', '%2E'),
+                    f'"{entity_path}"',
+                ]
+                
+                for path_format in path_formats:
+                    try:
+                        test_url = f"{self.api_v3}/catalog/by-path/{path_format}"
+                        test_response = self.session.get(test_url)
+                        if test_response.status_code == 200:
+                            catalog_data = test_response.json()
+                            logger.debug(f"Found entity with path format: {path_format}")
+                            return catalog_data.get('id')
+                    except Exception as e:
+                        logger.debug(f"Path format {path_format} failed: {e}")
                 
                 # Fallback: Search through catalog items
                 logger.debug(f"Searching catalog for entity: {entity_path}")
@@ -383,6 +454,15 @@ class DremioClient:
                             return item.get('id')
                     
                     logger.debug(f"No matching catalog item found for {entity_path}")
+                    
+                    # Last resort: Try to find by table name only (for DataMesh tables not in catalog)
+                    logger.debug(f"Trying to find entity by table name only: {table_name}")
+                    for item in catalog_items.get('data', []):
+                        item_name = item.get('name', '')
+                        if item_name.lower() == table_name.lower():
+                            logger.debug(f"Found entity by name match: {item_name} (ID: {item.get('id')})")
+                            return item.get('id')
+                    
                     return None
                 else:
                     logger.warning(f"Failed to search catalog: {search_response.status_code}")
