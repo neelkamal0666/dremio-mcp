@@ -245,7 +245,22 @@ class DremioClient:
             response = self.session.get(url)
             response.raise_for_status()
             
-            return response.json()
+            catalog_data = response.json()
+            
+            # Handle different response formats
+            if isinstance(catalog_data, dict):
+                # If it's a dict, look for 'data' key
+                if 'data' in catalog_data:
+                    return catalog_data['data']
+                else:
+                    # If no 'data' key, return the dict as a single item
+                    return [catalog_data]
+            elif isinstance(catalog_data, list):
+                # If it's already a list, return it
+                return catalog_data
+            else:
+                logger.warning(f"Unexpected catalog response format: {type(catalog_data)}")
+                return []
             
         except requests.exceptions.RequestException as e:
             logger.error(f"Error getting catalog items: {str(e)}")
