@@ -450,7 +450,12 @@ class DremioAIAgent:
             sql_query = self._clean_sql_query(sql_query)
             return sql_query
         except Exception as e:
-            logger.warning(f"AI SQL generation failed: {str(e)}")
+            error_msg = str(e)
+            if "Connection error" in error_msg:
+                logger.warning(f"AI SQL generation failed due to network connectivity issue: {error_msg}")
+                logger.info("Falling back to heuristic SQL generation")
+            else:
+                logger.warning(f"AI SQL generation failed: {error_msg}")
             return None
     
     def _generate_sql_heuristic(self, query: str, intent: Dict[str, Any]) -> Optional[str]:
@@ -486,12 +491,31 @@ class DremioAIAgent:
         # Fallback to common table names if no match found
         if not potential_table:
             logger.info(f"No matching table found in available tables, trying common table names")
-            common_tables = ['accounts', 'customers', 'users', 'orders', 'products', 'sales', 'demographics', 'profile', 'data']
+            common_tables = ['accounts', 'customers', 'users', 'orders', 'products', 'sales', 'demographics', 'profile', 'data', 'tags', 'projects']
             for table in common_tables:
                 if table in query_lower:
                     potential_table = table
                     logger.info(f"Using common table name: {potential_table}")
                     break
+        
+        # If still no table found, try to use the first available table as a fallback
+        if not potential_table:
+            try:
+                if self.dremio_client:
+                    available_tables = self.dremio_client.list_tables()
+                    if available_tables:
+                        # Use the first DataMesh table if available, otherwise first table
+                        for schema, table in available_tables:
+                            if 'datamesh' in schema.lower():
+                                potential_table = f"{schema}.{table}"
+                                logger.info(f"Using first DataMesh table as fallback: {potential_table}")
+                                break
+                        if not potential_table:
+                            schema, table = available_tables[0]
+                            potential_table = f"{schema}.{table}"
+                            logger.info(f"Using first available table as fallback: {potential_table}")
+            except Exception as e:
+                logger.warning(f"Could not get fallback table: {str(e)}")
         
         # If we have entities from intent analysis, use those
         if intent['entities'] and not potential_table:
@@ -517,6 +541,16 @@ class DremioAIAgent:
                 sql = f"SELECT * FROM {potential_table} LIMIT 50"
             else:
                 sql = "SELECT * FROM accounts LIMIT 50"  # Default fallback
+            return self._clean_sql_query(sql)
+        
+        # Handle "top" queries - try to find a reasonable column to order by
+        if 'top' in query_lower:
+            if potential_table:
+                # For top queries, we'll need to make some assumptions about ordering
+                # Try to find a reasonable column to order by or use a simple limit
+                sql = f"SELECT * FROM {potential_table} LIMIT 10"
+            else:
+                sql = "SELECT * FROM accounts LIMIT 10"  # Default fallback
             return self._clean_sql_query(sql)
         
         # If we have a potential table but no specific pattern, do a basic select
