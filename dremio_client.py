@@ -340,8 +340,9 @@ class DremioClient:
             return {}
     
     def _get_entity_id_by_path(self, entity_path: str) -> Optional[str]:
-        """Get entity ID from entity path"""
+        """Get entity ID from entity path using catalog search"""
         try:
+            # First try the direct by-path approach
             catalog_url = f"{self.api_v3}/catalog/by-path/{entity_path}"
             response = self.session.get(catalog_url)
             
@@ -349,8 +350,43 @@ class DremioClient:
                 catalog_data = response.json()
                 return catalog_data.get('id')
             else:
-                logger.debug(f"Could not find entity for path {entity_path}: {response.status_code}")
-                return None
+                logger.debug(f"Direct by-path failed for {entity_path}: {response.status_code}")
+                
+                # Fallback: Search through catalog items
+                logger.debug(f"Searching catalog for entity: {entity_path}")
+                search_url = f"{self.api_v3}/catalog"
+                search_response = self.session.get(search_url)
+                
+                if search_response.status_code == 200:
+                    catalog_items = search_response.json()
+                    
+                    # Extract table name from entity path for matching
+                    path_parts = entity_path.split('.')
+                    table_name = path_parts[-1] if path_parts else entity_path
+                    schema_parts = path_parts[:-1] if len(path_parts) > 1 else []
+                    
+                    # Look for matching items
+                    logger.debug(f"Searching through {len(catalog_items.get('data', []))} catalog items")
+                    for item in catalog_items.get('data', []):
+                        item_path = '.'.join(item.get('path', []))
+                        item_name = item.get('name', '')
+                        
+                        # Check if this item matches our target
+                        if (table_name.lower() in item_name.lower() and 
+                            any(part.lower() in item_path.lower() for part in schema_parts)):
+                            logger.debug(f"Found matching catalog item: {item_path} (ID: {item.get('id')})")
+                            return item.get('id')
+                        
+                        # Also check for exact path match
+                        if item_path.lower() == entity_path.lower():
+                            logger.debug(f"Found exact path match: {item_path} (ID: {item.get('id')})")
+                            return item.get('id')
+                    
+                    logger.debug(f"No matching catalog item found for {entity_path}")
+                    return None
+                else:
+                    logger.warning(f"Failed to search catalog: {search_response.status_code}")
+                    return None
                 
         except requests.exceptions.RequestException as e:
             logger.warning(f"Could not get entity ID for path {entity_path}: {str(e)}")

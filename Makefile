@@ -39,6 +39,9 @@ test-table-matching: ## Test table name matching fixes
 test-mcp-wiki: ## Test MCP server wiki functionality
 	python test_mcp_wiki.py
 
+test-entity-id: ## Test entity ID resolution for DataMesh tables
+	python test_entity_id.py
+
 test-connection: ## Test Dremio connection
 	python cli.py test-connection
 
