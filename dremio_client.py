@@ -460,14 +460,28 @@ class DremioClient:
                 if search_response.status_code == 200:
                     catalog_items = search_response.json()
                     
+                    # Ensure catalog_items is a dictionary
+                    if not isinstance(catalog_items, dict):
+                        logger.warning(f"Catalog response is not a dict: {type(catalog_items)}")
+                        return None
+                    
                     # Extract table name from entity path for matching
                     path_parts = entity_path.split('.')
                     table_name = path_parts[-1] if path_parts else entity_path
                     schema_parts = path_parts[:-1] if len(path_parts) > 1 else []
                     
                     # Look for matching items
-                    logger.debug(f"Searching through {len(catalog_items.get('data', []))} catalog items")
-                    for item in catalog_items.get('data', []):
+                    items_list = catalog_items.get('data', [])
+                    if not isinstance(items_list, list):
+                        logger.warning(f"Catalog data is not a list: {type(items_list)}")
+                        return None
+                    
+                    logger.debug(f"Searching through {len(items_list)} catalog items")
+                    for item in items_list:
+                        if not isinstance(item, dict):
+                            logger.debug(f"Skipping non-dict item: {type(item)}")
+                            continue
+                            
                         item_path = '.'.join(item.get('path', []))
                         item_name = item.get('name', '')
                         
@@ -486,7 +500,9 @@ class DremioClient:
                     
                     # Last resort: Try to find by table name only (for DataMesh tables not in catalog)
                     logger.debug(f"Trying to find entity by table name only: {table_name}")
-                    for item in catalog_items.get('data', []):
+                    for item in items_list:
+                        if not isinstance(item, dict):
+                            continue
                         item_name = item.get('name', '')
                         if item_name.lower() == table_name.lower():
                             logger.debug(f"Found entity by name match: {item_name} (ID: {item.get('id')})")
