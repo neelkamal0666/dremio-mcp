@@ -353,36 +353,65 @@ class DremioClient:
             response = self.session.get(search_url)
             
             if response.status_code == 200:
-                catalog_items = response.json()
-                
-                # Extract table name for matching
-                path_parts = entity_path.split('.')
-                table_name = path_parts[-1] if path_parts else entity_path
-                
-                # Look for any item with matching name (case-insensitive)
-                for item in catalog_items.get('data', []):
-                    item_name = item.get('name', '')
-                    if item_name.lower() == table_name.lower():
-                        entity_id = item.get('id')
-                        if entity_id:
-                            logger.debug(f"Found alternative entity ID for {entity_path}: {entity_id}")
+                try:
+                    catalog_items = response.json()
+                    logger.debug(f"Catalog response type: {type(catalog_items)}")
+                    
+                    # Ensure catalog_items is a dictionary
+                    if not isinstance(catalog_items, dict):
+                        logger.warning(f"Catalog response is not a dict: {type(catalog_items)}")
+                        return {}
+                    
+                    logger.debug(f"Catalog response keys: {list(catalog_items.keys())}")
+                    
+                    # Extract table name for matching
+                    path_parts = entity_path.split('.')
+                    table_name = path_parts[-1] if path_parts else entity_path
+                    
+                    # Look for any item with matching name (case-insensitive)
+                    items_list = catalog_items.get('data', [])
+                    if not isinstance(items_list, list):
+                        logger.warning(f"Catalog data is not a list: {type(items_list)}")
+                        return {}
+                    
+                    logger.debug(f"Items list length: {len(items_list)}")
+                    
+                    for item in items_list:
+                        if not isinstance(item, dict):
+                            logger.debug(f"Skipping non-dict item: {type(item)}")
+                            continue
                             
-                            # Try to get wiki content
-                            wiki_url = f"{self.api_v3}/catalog/{entity_id}/collaboration/wiki"
-                            wiki_response = self.session.get(wiki_url)
-                            
-                            if wiki_response.status_code == 200:
-                                wiki_data = wiki_response.json()
-                                wiki_text = wiki_data.get('text', '')
+                        item_name = item.get('name', '')
+                        if item_name.lower() == table_name.lower():
+                            entity_id = item.get('id')
+                            if entity_id:
+                                logger.debug(f"Found alternative entity ID for {entity_path}: {entity_id}")
                                 
-                                if wiki_text:
-                                    parsed_metadata = self._parse_wiki_metadata(wiki_text)
-                                    return {
-                                        'raw_text': wiki_text,
-                                        'parsed_metadata': parsed_metadata,
-                                        'last_modified': wiki_data.get('version', {}).get('createdAt'),
-                                        'author': wiki_data.get('version', {}).get('author')
-                                    }
+                                # Try to get wiki content
+                                wiki_url = f"{self.api_v3}/catalog/{entity_id}/collaboration/wiki"
+                                wiki_response = self.session.get(wiki_url)
+                                
+                                if wiki_response.status_code == 200:
+                                    try:
+                                        wiki_data = wiki_response.json()
+                                        if isinstance(wiki_data, dict):
+                                            wiki_text = wiki_data.get('text', '')
+                                            
+                                            if wiki_text:
+                                                parsed_metadata = self._parse_wiki_metadata(wiki_text)
+                                                return {
+                                                    'raw_text': wiki_text,
+                                                    'parsed_metadata': parsed_metadata,
+                                                    'last_modified': wiki_data.get('version', {}).get('createdAt'),
+                                                    'author': wiki_data.get('version', {}).get('author')
+                                                }
+                                    except Exception as e:
+                                        logger.debug(f"Error parsing wiki response: {e}")
+                except Exception as e:
+                    logger.warning(f"Error processing catalog response: {e}")
+                    return {}
+            else:
+                logger.warning(f"Catalog API returned status {response.status_code}")
             
             logger.debug(f"No wiki content found for {entity_path} using alternative approach")
             return {}
