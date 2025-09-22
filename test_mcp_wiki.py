@@ -16,23 +16,9 @@ async def test_mcp_wiki():
     print("🧪 Testing MCP Server Wiki Functionality")
     print("=" * 50)
     
-    # Configuration
-    config = DremioConfig(
-        host=os.getenv('DREMIO_HOST', 'localhost'),
-        port=int(os.getenv('DREMIO_PORT', '9047')),
-        username=os.getenv('DREMIO_USERNAME', ''),
-        password=os.getenv('DREMIO_PASSWORD', ''),
-        use_ssl=os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true',
-        verify_ssl=os.getenv('DREMIO_VERIFY_SSL', 'true').lower() == 'true',
-        cert_path=os.getenv('DREMIO_CERT_PATH'),
-        flight_port=int(os.getenv('DREMIO_FLIGHT_PORT', os.getenv('DREMIO_PORT', '32010'))),
-        default_source=os.getenv('DREMIO_DEFAULT_SOURCE'),
-        default_schema=os.getenv('DREMIO_DEFAULT_SCHEMA'),
-    )
-    
     try:
         # Initialize MCP server
-        mcp_server = DremioMCP(config)
+        mcp_server = DremioMCP()
         print("✅ MCP Server initialized successfully!")
         
         # Get some DataMesh tables to test with
