@@ -44,9 +44,19 @@ def debug_wiki_api_v2():
             print("❌ No tables found")
             return
         
-        # Test with first few tables
-        test_tables = tables[:3]
-        print(f"\n📋 Testing wiki API with {len(test_tables)} tables:")
+        # Filter for DataMesh tables specifically
+        datamesh_tables = [(schema, table) for schema, table in tables if 'DataMesh' in schema or 'datamesh' in schema.lower()]
+        
+        if not datamesh_tables:
+            print("❌ No DataMesh tables found. Available schemas:")
+            schemas = set([schema for schema, table in tables[:20]])
+            for schema in sorted(schemas):
+                print(f"   - {schema}")
+            return
+        
+        # Test with DataMesh tables
+        test_tables = datamesh_tables[:3]
+        print(f"\n📋 Testing wiki API with {len(test_tables)} DataMesh tables:")
         
         for schema, table in test_tables:
             table_path = f"{schema}.{table}"
@@ -54,100 +64,96 @@ def debug_wiki_api_v2():
             
             # Method 1: Get catalog item details first to find the ID
             print("   Method 1: Getting catalog item details...")
-            catalog_url = f"{client.api_v3}/catalog/by-path/{table_path}"
             
-            try:
-                response = client.session.get(catalog_url)
-                if response.status_code == 200:
-                    catalog_data = response.json()
-                    print(f"   ✅ Catalog data retrieved")
-                    print(f"   ID: {catalog_data.get('id', 'N/A')}")
-                    print(f"   Type: {catalog_data.get('entityType', 'N/A')}")
-                    print(f"   Path: {catalog_data.get('path', 'N/A')}")
+            # Try different path formats
+            path_formats = [
+                table_path,  # Original format
+                table_path.replace('.', '/'),  # Slash format
+                table_path.replace('.', '%2E'),  # URL encoded dots
+                f'"{table_path}"',  # Quoted format
+            ]
+            
+            for i, path_format in enumerate(path_formats):
+                catalog_url = f"{client.api_v3}/catalog/by-path/{path_format}"
+                print(f"     Format {i+1}: {catalog_url}")
+                
+                try:
+                    response = client.session.get(catalog_url)
+                    print(f"     Status: {response.status_code}")
                     
-                    # Check if there are any collaboration-related fields
-                    collaboration_fields = [k for k in catalog_data.keys() if 'collaboration' in k.lower() or 'wiki' in k.lower()]
-                    if collaboration_fields:
-                        print(f"   Collaboration fields: {collaboration_fields}")
-                        for field in collaboration_fields:
-                            print(f"     {field}: {catalog_data[field]}")
-                    
-                    # Method 2: Try wiki API with the ID
-                    entity_id = catalog_data.get('id')
-                    if entity_id:
-                        print(f"   Method 2: Trying wiki API with ID...")
-                        wiki_url_by_id = f"{client.api_v3}/catalog/{entity_id}/collaboration/wiki"
-                        print(f"   Wiki URL by ID: {wiki_url_by_id}")
+                    if response.status_code == 200:
+                        catalog_data = response.json()
+                        print(f"     ✅ Success with format {i+1}")
+                        print(f"     ID: {catalog_data.get('id', 'N/A')}")
+                        print(f"     Type: {catalog_data.get('entityType', 'N/A')}")
+                        print(f"     Path: {catalog_data.get('path', 'N/A')}")
                         
-                        try:
-                            wiki_response = client.session.get(wiki_url_by_id)
-                            print(f"   Status Code: {wiki_response.status_code}")
+                        # Test wiki with this ID
+                        entity_id = catalog_data.get('id')
+                        if entity_id:
+                            print(f"     Testing wiki with ID: {entity_id}")
+                            wiki_url = f"{client.api_v3}/catalog/{entity_id}/collaboration/wiki"
+                            wiki_response = client.session.get(wiki_url)
+                            print(f"     Wiki status: {wiki_response.status_code}")
                             
                             if wiki_response.status_code == 200:
                                 wiki_data = wiki_response.json()
-                                print(f"   ✅ Wiki content found!")
-                                print(f"   Response keys: {list(wiki_data.keys())}")
-                                
-                                if 'text' in wiki_data:
-                                    wiki_text = wiki_data['text']
-                                    if wiki_text and wiki_text.strip():
-                                        print(f"   Content length: {len(wiki_text)} characters")
-                                        print(f"   Preview: {wiki_text[:200]}...")
-                                    else:
-                                        print(f"   ❌ Wiki content is empty")
+                                if 'text' in wiki_data and wiki_data['text']:
+                                    print(f"     ✅ Wiki content found!")
+                                    print(f"     Content: {wiki_data['text'][:100]}...")
                                 else:
-                                    print(f"   ❌ No 'text' field in response")
-                                    print(f"   Full response: {json.dumps(wiki_data, indent=2)}")
+                                    print(f"     ❌ Wiki content is empty")
                             else:
-                                print(f"   ❌ Wiki API error: {wiki_response.text}")
-                                
-                        except Exception as e:
-                            print(f"   ❌ Wiki API exception: {e}")
-                    
-                    # Method 3: Try different URL patterns
-                    print(f"   Method 3: Trying alternative URL patterns...")
-                    alternative_patterns = [
-                        f"{client.api_v3}/catalog/{entity_id}/collaboration/wiki",
-                        f"{client.api_v3}/catalog/{entity_id}/wiki",
-                        f"{client.api_v3}/catalog/{entity_id}/collaboration",
-                        f"{client.api_v3}/catalog/by-path/{table_path}/collaboration/wiki",
-                        f"{client.api_v3}/catalog/by-path/{table_path}/wiki",
-                    ]
-                    
-                    for pattern in alternative_patterns:
-                        try:
-                            resp = client.session.get(pattern)
-                            print(f"     {pattern} -> {resp.status_code}")
-                            if resp.status_code == 200:
-                                data = resp.json()
-                                if 'text' in data and data['text']:
-                                    print(f"     ✅ Found wiki content at: {pattern}")
-                                    break
-                        except Exception as e:
-                            print(f"     ❌ {pattern} -> Error: {e}")
-                    
-                    # Method 4: Check if there's a different collaboration structure
-                    print(f"   Method 4: Checking collaboration structure...")
-                    collaboration_url = f"{client.api_v3}/catalog/{entity_id}/collaboration"
-                    try:
-                        collab_resp = client.session.get(collaboration_url)
-                        print(f"   Collaboration endpoint: {collab_resp.status_code}")
-                        if collab_resp.status_code == 200:
-                            collab_data = collab_resp.json()
-                            print(f"   Collaboration data: {json.dumps(collab_data, indent=2)}")
-                    except Exception as e:
-                        print(f"   ❌ Collaboration endpoint error: {e}")
+                                print(f"     ❌ Wiki not found: {wiki_response.text}")
+                        break
+                    else:
+                        print(f"     ❌ Failed: {response.text[:100]}...")
                         
-                else:
-                    print(f"   ❌ Failed to get catalog data: {response.status_code} - {response.text}")
-                    
-            except Exception as e:
-                print(f"   ❌ Exception getting catalog data: {e}")
+                except Exception as e:
+                    print(f"     ❌ Exception: {e}")
+            
+            # If none of the path formats worked, try alternative approaches
+            if i == len(path_formats) - 1:  # If we tried all formats and none worked
+                print("   Method 2: Trying alternative catalog search...")
+                
+                # Try to search for the table in the catalog
+                try:
+                    search_url = f"{client.api_v3}/catalog"
+                    response = client.session.get(search_url)
+                    if response.status_code == 200:
+                        catalog_items = response.json()
+                        print(f"     Found {len(catalog_items.get('data', []))} catalog items")
+                        
+                        # Look for our table in the catalog
+                        for item in catalog_items.get('data', []):
+                            item_path = '.'.join(item.get('path', []))
+                            if table.lower() in item_path.lower() and 'datamesh' in item_path.lower():
+                                print(f"     Found matching item: {item_path}")
+                                print(f"     ID: {item.get('id')}")
+                                
+                                # Test wiki with this ID
+                                entity_id = item.get('id')
+                                if entity_id:
+                                    wiki_url = f"{client.api_v3}/catalog/{entity_id}/collaboration/wiki"
+                                    wiki_response = client.session.get(wiki_url)
+                                    print(f"     Wiki status: {wiki_response.status_code}")
+                                    
+                                    if wiki_response.status_code == 200:
+                                        wiki_data = wiki_response.json()
+                                        if 'text' in wiki_data and wiki_data['text']:
+                                            print(f"     ✅ Wiki content found!")
+                                            print(f"     Content: {wiki_data['text'][:100]}...")
+                                        else:
+                                            print(f"     ❌ Wiki content is empty")
+                                    else:
+                                        print(f"     ❌ Wiki not found")
+                                break
+                except Exception as e:
+                    print(f"     ❌ Search exception: {e}")
         
-        # Method 5: Try to find any existing wiki content in the system
-        print(f"\n🔍 Method 5: Searching for any existing wiki content...")
+        # Method 3: Search for DataMesh tables with wiki content
+        print(f"\n🔍 Method 3: Searching for DataMesh tables with wiki content...")
         
-        # Try to get all catalog items and check for wiki content
         try:
             all_catalog_url = f"{client.api_v3}/catalog"
             response = client.session.get(all_catalog_url)
@@ -155,11 +161,20 @@ def debug_wiki_api_v2():
                 catalog_items = response.json()
                 print(f"   Found {len(catalog_items.get('data', []))} catalog items")
                 
-                # Check first few items for wiki content
-                for item in catalog_items.get('data', [])[:5]:
+                # Look specifically for DataMesh tables
+                datamesh_items = []
+                for item in catalog_items.get('data', []):
+                    item_path = '.'.join(item.get('path', []))
+                    if 'datamesh' in item_path.lower() or 'DataMesh' in item_path:
+                        datamesh_items.append(item)
+                
+                print(f"   Found {len(datamesh_items)} DataMesh items")
+                
+                # Check DataMesh items for wiki content
+                for item in datamesh_items[:5]:  # Check first 5 DataMesh items
                     item_id = item.get('id')
                     item_path = '.'.join(item.get('path', []))
-                    print(f"   Checking: {item_path} (ID: {item_id})")
+                    print(f"   Checking DataMesh item: {item_path} (ID: {item_id})")
                     
                     if item_id:
                         wiki_url = f"{client.api_v3}/catalog/{item_id}/collaboration/wiki"
@@ -171,8 +186,12 @@ def debug_wiki_api_v2():
                                     print(f"   ✅ Found wiki content for: {item_path}")
                                     print(f"   Content: {wiki_data['text'][:100]}...")
                                     break
+                                else:
+                                    print(f"   ❌ No wiki content for: {item_path}")
+                            else:
+                                print(f"   ❌ Wiki not found for: {item_path} (status: {wiki_resp.status_code})")
                         except Exception as e:
-                            pass
+                            print(f"   ❌ Error checking wiki for {item_path}: {e}")
             else:
                 print(f"   ❌ Failed to get catalog items: {response.status_code}")
         except Exception as e:
