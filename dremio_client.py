@@ -360,13 +360,29 @@ class DremioClient:
                     
                     # Parse wiki content for structured metadata
                     wiki_text = wiki_data.get('text', '')
+                    logger.debug(f"Wiki text length: {len(wiki_text)}")
+                    
                     parsed_metadata = self._parse_wiki_metadata(wiki_text)
+                    logger.debug(f"Parsed metadata type: {type(parsed_metadata)}")
+                    
+                    # Handle version data safely
+                    version_data = wiki_data.get('version', {})
+                    logger.debug(f"Version data type: {type(version_data)}")
+                    logger.debug(f"Version data: {version_data}")
+                    
+                    if isinstance(version_data, dict):
+                        last_modified = version_data.get('createdAt')
+                        author = version_data.get('author')
+                    else:
+                        logger.warning(f"Version data is not a dict: {type(version_data)}")
+                        last_modified = None
+                        author = None
                     
                     return {
                         'raw_text': wiki_text,
                         'parsed_metadata': parsed_metadata,
-                        'last_modified': wiki_data.get('version', {}).get('createdAt'),
-                        'author': wiki_data.get('version', {}).get('author')
+                        'last_modified': last_modified,
+                        'author': author
                     }
                 except Exception as e:
                     logger.error(f"Error processing wiki data: {e}")
