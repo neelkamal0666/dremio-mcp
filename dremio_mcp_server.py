@@ -402,13 +402,15 @@ class DremioMCP:
             )
     
     async def _get_wiki_description(self, table_path: str) -> str:
-        """Get wiki description for a table (requires Dremio API)"""
+        """Get wiki description for a table using the Dremio client"""
         try:
-            # This would require implementing Dremio REST API calls
-            # For now, return a placeholder
-            return "Wiki description not available (requires Dremio API integration)"
-        except Exception:
-            return "Wiki description not available"
+            wiki_description = self.client.get_wiki_description(table_path)
+            if wiki_description:
+                return wiki_description
+            else:
+                return "No wiki description available for this table"
+        except Exception as e:
+            return f"Error retrieving wiki description: {str(e)}"
     
     async def _search_tables(self, arguments: Dict[str, Any]) -> CallToolResult:
         """Search for tables by name or description"""

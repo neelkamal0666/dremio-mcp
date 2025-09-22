@@ -36,6 +36,9 @@ test-sql: ## Test SQL generation fixes
 test-table-matching: ## Test table name matching fixes
 	python test_table_matching.py
 
+test-mcp-wiki: ## Test MCP server wiki functionality
+	python test_mcp_wiki.py
+
 test-connection: ## Test Dremio connection
 	python cli.py test-connection
 
