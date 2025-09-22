@@ -4,8 +4,12 @@ Simple test script to verify wiki fix
 """
 
 import os
+import logging
 from dotenv import load_dotenv
 from dremio_client import DremioClient
+
+# Set logging level to INFO to reduce noise
+logging.basicConfig(level=logging.INFO)
 
 # Load environment variables
 load_dotenv()
