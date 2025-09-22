@@ -4,8 +4,12 @@ Simple test to verify wiki fix works
 """
 
 import os
+import logging
 from dotenv import load_dotenv
 from dremio_client import DremioClient
+
+# Enable debug logging
+logging.basicConfig(level=logging.DEBUG)
 
 # Load environment variables
 load_dotenv()

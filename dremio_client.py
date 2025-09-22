@@ -323,6 +323,8 @@ class DremioClient:
     def get_wiki_metadata(self, entity_path: str) -> Dict[str, Any]:
         """Get comprehensive wiki metadata including tags, descriptions, and custom fields"""
         try:
+            logger.debug(f"Getting wiki metadata for: {entity_path}")
+            
             # First get the entity ID from the path
             entity_id = self._get_entity_id_by_path(entity_path)
             if not entity_id:
@@ -331,33 +333,50 @@ class DremioClient:
                 # For DataMesh tables, try alternative approaches
                 if 'DataMesh' in entity_path or 'datamesh' in entity_path.lower():
                     logger.debug(f"Trying alternative approach for DataMesh table: {entity_path}")
-                    return self._get_wiki_metadata_alternative(entity_path)
+                    try:
+                        result = self._get_wiki_metadata_alternative(entity_path)
+                        logger.debug(f"Alternative approach result: {type(result)}")
+                        return result
+                    except Exception as e:
+                        logger.error(f"Alternative approach failed: {e}")
+                        return {}
                 
                 return {}
+            
+            logger.debug(f"Found entity ID: {entity_id}")
             
             # Try to get wiki content using entity ID
             wiki_url = f"{self.api_v3}/catalog/{entity_id}/collaboration/wiki"
             response = self.session.get(wiki_url)
             
             if response.status_code == 200:
-                wiki_data = response.json()
-                
-                # Parse wiki content for structured metadata
-                wiki_text = wiki_data.get('text', '')
-                parsed_metadata = self._parse_wiki_metadata(wiki_text)
-                
-                return {
-                    'raw_text': wiki_text,
-                    'parsed_metadata': parsed_metadata,
-                    'last_modified': wiki_data.get('version', {}).get('createdAt'),
-                    'author': wiki_data.get('version', {}).get('author')
-                }
+                try:
+                    wiki_data = response.json()
+                    logger.debug(f"Wiki data type: {type(wiki_data)}")
+                    
+                    if not isinstance(wiki_data, dict):
+                        logger.warning(f"Wiki data is not a dict: {type(wiki_data)}")
+                        return {}
+                    
+                    # Parse wiki content for structured metadata
+                    wiki_text = wiki_data.get('text', '')
+                    parsed_metadata = self._parse_wiki_metadata(wiki_text)
+                    
+                    return {
+                        'raw_text': wiki_text,
+                        'parsed_metadata': parsed_metadata,
+                        'last_modified': wiki_data.get('version', {}).get('createdAt'),
+                        'author': wiki_data.get('version', {}).get('author')
+                    }
+                except Exception as e:
+                    logger.error(f"Error processing wiki data: {e}")
+                    return {}
             else:
                 logger.debug(f"Wiki not found for {entity_path} (ID: {entity_id}): {response.status_code}")
                 return {}
                 
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Could not get wiki metadata: {str(e)}")
+        except Exception as e:
+            logger.error(f"Could not get wiki metadata: {str(e)}")
             return {}
     
     def _get_wiki_metadata_alternative(self, entity_path: str) -> Dict[str, Any]:
