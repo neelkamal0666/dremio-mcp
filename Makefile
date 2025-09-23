@@ -94,6 +94,28 @@ docs: ## Generate documentation
 	@echo "Documentation is available in README.md"
 	@echo "For API documentation, run: python -c 'import dremio_client; help(dremio_client.DremioClient)'"
 
+# Flask API commands
+start-flask: ## Start Flask API server
+	python start_flask_api.py
+
+test-flask: ## Test Flask API
+	python test_flask_api.py
+
+run-flask-dev: ## Run Flask API in development mode
+	FLASK_DEBUG=true python start_flask_api.py
+
+test-enhanced-queries: ## Test enhanced query examples
+	python example_enhanced_queries.py
+
+test-mcp-direct: ## Test MCP server direct access
+	python test_mcp_direct.py
+
+test-mcp-json: ## Test MCP server with JSON responses
+	python test_mcp_json.py
+
+start-mcp-json: ## Start MCP server with JSON responses
+	python dremio_mcp_server_json.py
+
 # Quick start
 quick-start: install setup test ## Quick start: install, setup, and test
 	@echo "Quick start completed!"
