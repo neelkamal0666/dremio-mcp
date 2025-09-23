@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from dremio_client import DremioClient
 from ai_agent import DremioAIAgent
+from dremio_mcp_server_json import DremioMCPServerJSON
 
 # Load environment variables
 load_dotenv()
@@ -221,6 +222,72 @@ def query(query, limit, host, port, ssl, verify, cert_path, flight_port, default
         
     except Exception as e:
         click.echo(f"❌ Query failed: {e}")
+        sys.exit(1)
+
+@cli.group()
+def mcp_json():
+    """Call JSON MCP server tools directly"""
+    pass
+
+@mcp_json.command("tables")
+def mcp_json_tables():
+    """List tables using JSON MCP server"""
+    async def _run():
+        server = DremioMCPServerJSON()
+        result = await server._list_tables_json({})
+        click.echo(json.dumps(result, indent=2, default=str))
+    try:
+        asyncio.run(_run())
+    except Exception as e:
+        click.echo(f"❌ MCP JSON tables failed: {e}")
+        sys.exit(1)
+
+@mcp_json.command("ask")
+@click.option('--question', '-q', required=True, help='Natural language question')
+def mcp_json_ask(question: str):
+    """Ask a natural language question via JSON MCP server"""
+    async def _run():
+        server = DremioMCPServerJSON()
+        result = await server._process_natural_language_query_json({
+            "question": question
+        })
+        click.echo(json.dumps(result, indent=2, default=str))
+    try:
+        asyncio.run(_run())
+    except Exception as e:
+        click.echo(f"❌ MCP JSON ask failed: {e}")
+        sys.exit(1)
+
+@mcp_json.command("sql")
+@click.option('--query', '-Q', required=True, help='SQL query to execute')
+def mcp_json_sql(query: str):
+    """Run a SQL query via JSON MCP server"""
+    async def _run():
+        server = DremioMCPServerJSON()
+        result = await server._query_dremio_json({
+            "query": query
+        })
+        click.echo(json.dumps(result, indent=2, default=str))
+    try:
+        asyncio.run(_run())
+    except Exception as e:
+        click.echo(f"❌ MCP JSON sql failed: {e}")
+        sys.exit(1)
+
+@mcp_json.command("metadata")
+@click.option('--table', '-t', required=True, help='Fully qualified table name')
+def mcp_json_metadata(table: str):
+    """Get table metadata via JSON MCP server"""
+    async def _run():
+        server = DremioMCPServerJSON()
+        result = await server._get_table_metadata_json({
+            "table": table
+        })
+        click.echo(json.dumps(result, indent=2, default=str))
+    try:
+        asyncio.run(_run())
+    except Exception as e:
+        click.echo(f"❌ MCP JSON metadata failed: {e}")
         sys.exit(1)
 
 @cli.command()
