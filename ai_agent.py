@@ -15,7 +15,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from anthropic import Anthropic
+from openai import OpenAI
 from dremio_client import DremioClient
 
 logger = logging.getLogger(__name__)
@@ -23,40 +23,25 @@ logger = logging.getLogger(__name__)
 class DremioAIAgent:
     """AI Agent for natural language interaction with Dremio data"""
     
-    def __init__(self, dremio_client: DremioClient, anthropic_api_key: Optional[str] = None):
+    def __init__(self, dremio_client: DremioClient, openai_api_key: Optional[str] = None):
         self.dremio_client = dremio_client
-        self.anthropic_client: Optional[Anthropic] = None
+        self.openai_client: Optional[OpenAI] = None
         
-        if anthropic_api_key:
-            # Try to initialize with SSL verification disabled for corporate environments
+        if openai_api_key:
             try:
-                import ssl
-                import urllib3
-                # Disable SSL warnings for corporate environments
-                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-                
-                # Create client with custom SSL context
-                ssl_context = ssl.create_default_context()
-                ssl_context.check_hostname = False
-                ssl_context.verify_mode = ssl.CERT_NONE
-                
-                self.anthropic_client = Anthropic(
-                    api_key=anthropic_api_key,
-                    # Note: Anthropic client doesn't directly support SSL context
-                    # This is a workaround for corporate environments
-                )
+                self.openai_client = OpenAI(api_key=openai_api_key)
+                logger.info("OpenAI client initialized successfully")
             except Exception as e:
-                logger.warning(f"Failed to initialize Anthropic client with SSL workaround: {e}")
-                # Fallback to standard initialization
-                self.anthropic_client = Anthropic(api_key=anthropic_api_key)
+                logger.warning(f"Failed to initialize OpenAI client: {e}")
+                self.openai_client = None
         
         # Cache for metadata to avoid repeated API calls
         self.metadata_cache = {}
         self.table_schemas = {}
         
-    def set_anthropic_key(self, api_key: str):
-        """Set Anthropic API key for enhanced natural language processing"""
-        self.anthropic_client = Anthropic(api_key=api_key)
+    def set_openai_key(self, api_key: str):
+        """Set OpenAI API key for enhanced natural language processing"""
+        self.openai_client = OpenAI(api_key=api_key)
     
     async def process_query(self, user_query: str) -> Dict[str, Any]:
         """Process a natural language query and return results"""
@@ -184,7 +169,7 @@ class DremioAIAgent:
         """Handle data-related queries"""
         try:
             # Generate SQL query using AI if available
-            if self.anthropic_client:
+            if self.openai_client:
                 sql_query = await self._generate_sql_with_ai(query, intent)
             else:
                 sql_query = self._generate_sql_heuristic(query, intent)
@@ -393,7 +378,7 @@ class DremioAIAgent:
     async def _generate_sql_with_ai(self, query: str, intent: Dict[str, Any]) -> Optional[str]:
         """Generate SQL query using Anthropic Claude API"""
         try:
-            if not self.anthropic_client:
+            if not self.openai_client:
                 return None
             
             # Try to get available tables and wiki context, but don't fail if it doesn't work
@@ -453,16 +438,16 @@ class DremioAIAgent:
                 "Return only the SQL query, no explanations."
             )
             
-            def _call_anthropic():
-                return self.anthropic_client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
+            def _call_openai():
+                return self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
                     max_tokens=500,
                     temperature=0.1,
                     messages=[{"role": "user", "content": prompt}]
                 )
             
-            response = await asyncio.to_thread(_call_anthropic)
-            sql_query = response.content[0].text.strip()
+            response = await asyncio.to_thread(_call_openai)
+            sql_query = response.choices[0].message.content.strip()
             sql_query = re.sub(r'^```sql\s*', '', sql_query)
             sql_query = re.sub(r'\s*```$', '', sql_query)
             
@@ -635,7 +620,7 @@ class DremioAIAgent:
     
     async def explain_query(self, sql_query: str) -> str:
         """Explain what a SQL query does in natural language"""
-        if not self.anthropic_client:
+        if not self.openai_client:
             return "AI explanation not available. Please set Anthropic API key."
         
         try:
@@ -646,16 +631,16 @@ class DremioAIAgent:
                 "and any important details about the results."
             )
             
-            def _call_anthropic():
-                return self.anthropic_client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
+            def _call_openai():
+                return self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
                     max_tokens=300,
                     temperature=0.3,
                     messages=[{"role": "user", "content": prompt}]
                 )
             
-            response = await asyncio.to_thread(_call_anthropic)
-            return response.content[0].text.strip()
+            response = await asyncio.to_thread(_call_openai)
+            return response.choices[0].message.content.strip()
             
         except Exception as e:
             logger.error(f"Error explaining query: {str(e)}")

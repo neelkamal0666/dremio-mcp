@@ -61,10 +61,10 @@ async def main():
     agent = DremioAIAgent(client)
     
     # Set Anthropic API key if available
-    anthropic_key = os.getenv('ANTHROPIC_API_KEY')
-    if anthropic_key:
-        agent.set_anthropic_key(anthropic_key)
-        print("🤖 AI Agent initialized with Claude support")
+    openai_key = os.getenv('OPENAI_API_KEY')
+    if openai_key:
+        agent.set_openai_key(openai_key)
+        print("🤖 AI Agent initialized with OpenAI support")
     else:
         print("🤖 AI Agent initialized (basic mode)")
     

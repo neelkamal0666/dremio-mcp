@@ -81,7 +81,7 @@ def test_connection(host, port, username, password, ssl, verify, cert_path, flig
         sys.exit(1)
 
 @cli.command()
-@click.option('--anthropic-key', help='Anthropic API key for enhanced AI features (defaults to ANTHROPIC_API_KEY env var)')
+@click.option('--openai-key', help='OpenAI API key for enhanced AI features (defaults to OPENAI_API_KEY env var)')
 @click.option('--host', default=os.getenv('DREMIO_HOST', 'localhost'), help='Dremio host')
 @click.option('--port', default=int(os.getenv('DREMIO_PORT', '9047')), help='Dremio REST port')
 @click.option('--ssl/--no-ssl', default=os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true', help='Use SSL for REST')
@@ -90,15 +90,15 @@ def test_connection(host, port, username, password, ssl, verify, cert_path, flig
 @click.option('--flight-port', default=int(os.getenv('DREMIO_FLIGHT_PORT', os.getenv('DREMIO_PORT', '32010'))), help='Dremio Flight SQL port')
 @click.option('--default-source', default=os.getenv('DREMIO_DEFAULT_SOURCE'), help='Default source to scope listings (defaults to DREMIO_DEFAULT_SOURCE)')
 @click.option('--default-schema', default=os.getenv('DREMIO_DEFAULT_SCHEMA'), help='Default schema to scope listings (defaults to DREMIO_DEFAULT_SCHEMA)')
-def interactive(anthropic_key, host, port, ssl, verify, cert_path, flight_port, default_source, default_schema):
+def interactive(openai_key, host, port, ssl, verify, cert_path, flight_port, default_source, default_schema):
     """Start interactive AI agent session"""
-    asyncio.run(_interactive_async(anthropic_key, host, port, ssl, verify, cert_path, flight_port, default_source, default_schema))
+    asyncio.run(_interactive_async(openai_key, host, port, ssl, verify, cert_path, flight_port, default_source, default_schema))
 
-async def _interactive_async(anthropic_key, host, port, ssl, verify, cert_path, flight_port, default_source, default_schema):
+async def _interactive_async(openai_key, host, port, ssl, verify, cert_path, flight_port, default_source, default_schema):
     """Async implementation of interactive session"""
     # Prefer explicit flag; fallback to environment variable
-    if not anthropic_key:
-        anthropic_key = os.getenv('ANTHROPIC_API_KEY')
+    if not openai_key:
+        openai_key = os.getenv('OPENAI_API_KEY')
     # If defaults are still None, fall back to env here as well
     default_source = default_source or os.getenv('DREMIO_DEFAULT_SOURCE')
     default_schema = default_schema or os.getenv('DREMIO_DEFAULT_SCHEMA')
@@ -125,8 +125,8 @@ async def _interactive_async(anthropic_key, host, port, ssl, verify, cert_path, 
         click.echo(f"Using CA bundle: {cert_path}")
     if default_source or default_schema:
         click.echo(f"Default scope: source={default_source}, schema={default_schema}")
-    if anthropic_key:
-        click.echo("Using Anthropic key from environment/flag")
+    if openai_key:
+        click.echo("Using OpenAI key from environment/flag")
     
     try:
         # Initialize client and agent
@@ -136,11 +136,11 @@ async def _interactive_async(anthropic_key, host, port, ssl, verify, cert_path, 
             sys.exit(1)
         
         agent = DremioAIAgent(client)
-        if anthropic_key:
-            agent.set_anthropic_key(anthropic_key)
-            click.echo("🤖 AI Agent initialized with Claude support")
+        if openai_key:
+            agent.set_openai_key(openai_key)
+            click.echo("🤖 AI Agent initialized with OpenAI support")
         else:
-            click.echo("🤖 AI Agent initialized (basic mode - set ANTHROPIC_API_KEY in .env or use --anthropic-key)")
+            click.echo("🤖 AI Agent initialized (basic mode - set OPENAI_API_KEY in .env or use --openai-key)")
         
         click.echo("✅ Connected to Dremio! Type 'help' for commands or ask questions about your data.")
         click.echo("Type 'exit' to quit.\n")
