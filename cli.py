@@ -262,7 +262,7 @@ def mcp_json_tables(host, port, ssl, verify, cert_path, username, password):
         sys.exit(1)
 
 @mcp_json.command("ask")
-@click.option('--question', '-q', required=True, prompt=True, help='Natural language question')
+@click.option('--question', '-q', required=True, help='Natural language question (defaults to MCP_QUESTION env if not provided)')
 @click.option('--host', default=os.getenv('DREMIO_HOST', 'localhost'), help='Dremio host')
 @click.option('--port', default=int(os.getenv('DREMIO_PORT', '9047')), help='Dremio REST port')
 @click.option('--ssl/--no-ssl', default=os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true', help='Use SSL for REST')
@@ -272,6 +272,12 @@ def mcp_json_tables(host, port, ssl, verify, cert_path, username, password):
 @click.option('--password', default=os.getenv('DREMIO_PASSWORD', ''), help='Dremio password')
 def mcp_json_ask(question: str, host, port, ssl, verify, cert_path, username, password):
     """Ask a natural language question via JSON MCP server"""
+    # Allow question from environment if not provided via flag
+    if not question:
+        question = os.getenv('MCP_QUESTION', '')
+        if not question:
+            click.echo("❌ Question is required. Provide --question or set MCP_QUESTION in .env")
+            sys.exit(1)
     # Propagate connection settings to env for server initialization
     os.environ['DREMIO_HOST'] = str(host)
     os.environ['DREMIO_PORT'] = str(port)
