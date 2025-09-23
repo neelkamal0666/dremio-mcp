@@ -230,8 +230,27 @@ def mcp_json():
     pass
 
 @mcp_json.command("tables")
-def mcp_json_tables():
+@click.option('--host', default=os.getenv('DREMIO_HOST', 'localhost'), help='Dremio host')
+@click.option('--port', default=int(os.getenv('DREMIO_PORT', '9047')), help='Dremio REST port')
+@click.option('--ssl/--no-ssl', default=os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true', help='Use SSL for REST')
+@click.option('--verify/--no-verify', default=os.getenv('DREMIO_VERIFY_SSL', 'true').lower() == 'true', help='Verify SSL certificates')
+@click.option('--cert-path', default=os.getenv('DREMIO_CERT_PATH'), help='Custom CA bundle path')
+@click.option('--username', default=os.getenv('DREMIO_USERNAME', ''), help='Dremio username')
+@click.option('--password', default=os.getenv('DREMIO_PASSWORD', ''), help='Dremio password')
+def mcp_json_tables(host, port, ssl, verify, cert_path, username, password):
     """List tables using JSON MCP server"""
+    # Propagate connection settings to env for server initialization
+    os.environ['DREMIO_HOST'] = str(host)
+    os.environ['DREMIO_PORT'] = str(port)
+    os.environ['DREMIO_USE_SSL'] = 'true' if ssl else 'false'
+    os.environ['DREMIO_VERIFY_SSL'] = 'true' if verify else 'false'
+    if cert_path:
+        os.environ['DREMIO_CERT_PATH'] = str(cert_path)
+    if username:
+        os.environ['DREMIO_USERNAME'] = str(username)
+    if password:
+        os.environ['DREMIO_PASSWORD'] = str(password)
+
     async def _run():
         server = DremioMCPServerJSON()
         result = await server._list_tables_json({})
@@ -243,9 +262,28 @@ def mcp_json_tables():
         sys.exit(1)
 
 @mcp_json.command("ask")
-@click.option('--question', '-q', required=True, help='Natural language question')
-def mcp_json_ask(question: str):
+@click.option('--question', '-q', required=True, prompt=True, help='Natural language question')
+@click.option('--host', default=os.getenv('DREMIO_HOST', 'localhost'), help='Dremio host')
+@click.option('--port', default=int(os.getenv('DREMIO_PORT', '9047')), help='Dremio REST port')
+@click.option('--ssl/--no-ssl', default=os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true', help='Use SSL for REST')
+@click.option('--verify/--no-verify', default=os.getenv('DREMIO_VERIFY_SSL', 'true').lower() == 'true', help='Verify SSL certificates')
+@click.option('--cert-path', default=os.getenv('DREMIO_CERT_PATH'), help='Custom CA bundle path')
+@click.option('--username', default=os.getenv('DREMIO_USERNAME', ''), help='Dremio username')
+@click.option('--password', default=os.getenv('DREMIO_PASSWORD', ''), help='Dremio password')
+def mcp_json_ask(question: str, host, port, ssl, verify, cert_path, username, password):
     """Ask a natural language question via JSON MCP server"""
+    # Propagate connection settings to env for server initialization
+    os.environ['DREMIO_HOST'] = str(host)
+    os.environ['DREMIO_PORT'] = str(port)
+    os.environ['DREMIO_USE_SSL'] = 'true' if ssl else 'false'
+    os.environ['DREMIO_VERIFY_SSL'] = 'true' if verify else 'false'
+    if cert_path:
+        os.environ['DREMIO_CERT_PATH'] = str(cert_path)
+    if username:
+        os.environ['DREMIO_USERNAME'] = str(username)
+    if password:
+        os.environ['DREMIO_PASSWORD'] = str(password)
+
     async def _run():
         server = DremioMCPServerJSON()
         result = await server._process_natural_language_query_json({
@@ -260,8 +298,27 @@ def mcp_json_ask(question: str):
 
 @mcp_json.command("sql")
 @click.option('--query', '-Q', required=True, help='SQL query to execute')
-def mcp_json_sql(query: str):
+@click.option('--host', default=os.getenv('DREMIO_HOST', 'localhost'), help='Dremio host')
+@click.option('--port', default=int(os.getenv('DREMIO_PORT', '9047')), help='Dremio REST port')
+@click.option('--ssl/--no-ssl', default=os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true', help='Use SSL for REST')
+@click.option('--verify/--no-verify', default=os.getenv('DREMIO_VERIFY_SSL', 'true').lower() == 'true', help='Verify SSL certificates')
+@click.option('--cert-path', default=os.getenv('DREMIO_CERT_PATH'), help='Custom CA bundle path')
+@click.option('--username', default=os.getenv('DREMIO_USERNAME', ''), help='Dremio username')
+@click.option('--password', default=os.getenv('DREMIO_PASSWORD', ''), help='Dremio password')
+def mcp_json_sql(query: str, host, port, ssl, verify, cert_path, username, password):
     """Run a SQL query via JSON MCP server"""
+    # Propagate connection settings to env for server initialization
+    os.environ['DREMIO_HOST'] = str(host)
+    os.environ['DREMIO_PORT'] = str(port)
+    os.environ['DREMIO_USE_SSL'] = 'true' if ssl else 'false'
+    os.environ['DREMIO_VERIFY_SSL'] = 'true' if verify else 'false'
+    if cert_path:
+        os.environ['DREMIO_CERT_PATH'] = str(cert_path)
+    if username:
+        os.environ['DREMIO_USERNAME'] = str(username)
+    if password:
+        os.environ['DREMIO_PASSWORD'] = str(password)
+
     async def _run():
         server = DremioMCPServerJSON()
         result = await server._query_dremio_json({
@@ -276,8 +333,27 @@ def mcp_json_sql(query: str):
 
 @mcp_json.command("metadata")
 @click.option('--table', '-t', required=True, help='Fully qualified table name')
-def mcp_json_metadata(table: str):
+@click.option('--host', default=os.getenv('DREMIO_HOST', 'localhost'), help='Dremio host')
+@click.option('--port', default=int(os.getenv('DREMIO_PORT', '9047')), help='Dremio REST port')
+@click.option('--ssl/--no-ssl', default=os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true', help='Use SSL for REST')
+@click.option('--verify/--no-verify', default=os.getenv('DREMIO_VERIFY_SSL', 'true').lower() == 'true', help='Verify SSL certificates')
+@click.option('--cert-path', default=os.getenv('DREMIO_CERT_PATH'), help='Custom CA bundle path')
+@click.option('--username', default=os.getenv('DREMIO_USERNAME', ''), help='Dremio username')
+@click.option('--password', default=os.getenv('DREMIO_PASSWORD', ''), help='Dremio password')
+def mcp_json_metadata(table: str, host, port, ssl, verify, cert_path, username, password):
     """Get table metadata via JSON MCP server"""
+    # Propagate connection settings to env for server initialization
+    os.environ['DREMIO_HOST'] = str(host)
+    os.environ['DREMIO_PORT'] = str(port)
+    os.environ['DREMIO_USE_SSL'] = 'true' if ssl else 'false'
+    os.environ['DREMIO_VERIFY_SSL'] = 'true' if verify else 'false'
+    if cert_path:
+        os.environ['DREMIO_CERT_PATH'] = str(cert_path)
+    if username:
+        os.environ['DREMIO_USERNAME'] = str(username)
+    if password:
+        os.environ['DREMIO_PASSWORD'] = str(password)
+
     async def _run():
         server = DremioMCPServerJSON()
         result = await server._get_table_metadata_json({
