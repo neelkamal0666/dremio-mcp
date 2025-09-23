@@ -116,6 +116,15 @@ test-mcp-json: ## Test MCP server with JSON responses
 start-mcp-json: ## Start MCP server with JSON responses
 	python dremio_mcp_server_json.py
 
+test-bedrock: ## Test AWS Bedrock integration
+	python test_bedrock_integration.py
+
+test-bedrock-simple: ## Test Bedrock AI agent (simple)
+	python test_bedrock_simple.py
+
+start-mcp-bedrock: ## Start MCP server with Bedrock
+	BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0 python dremio_mcp_server_json.py
+
 # Quick start
 quick-start: install setup test ## Quick start: install, setup, and test
 	@echo "Quick start completed!"
