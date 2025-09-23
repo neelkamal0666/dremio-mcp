@@ -33,6 +33,30 @@ class DremioAIAgentBedrock:
             self._init_bedrock()
         else:
             logger.warning(f"Unknown provider: {provider}. Using heuristic SQL generation.")
+
+    def _normalize_table_names(self, tables: List[Any]) -> List[str]:
+        """Convert table entries to fully qualified string names.
+
+        Accepts items like:
+        - "DataMesh.application.accounts"
+        - (schema, table)
+        - (source, schema, table)
+        Returns a list of dotted strings.
+        """
+        normalized: List[str] = []
+        for item in tables or []:
+            if isinstance(item, str):
+                normalized.append(item)
+            elif isinstance(item, tuple) or isinstance(item, list):
+                parts = [str(p) for p in item if p is not None]
+                if parts:
+                    normalized.append(".".join(parts))
+            else:
+                try:
+                    normalized.append(str(item))
+                except Exception:
+                    continue
+        return normalized
     
     def _init_openai(self):
         """Initialize OpenAI client"""
@@ -152,7 +176,8 @@ class DremioAIAgentBedrock:
     def _handle_table_exploration(self, question: str) -> str:
         """Handle table exploration queries"""
         try:
-            tables = self.dremio_client.list_tables()
+            tables_raw = self.dremio_client.list_tables()
+            tables = self._normalize_table_names(tables_raw)
             
             # Filter tables based on question keywords
             filtered_tables = self._filter_tables_by_keywords(tables, question)
@@ -173,7 +198,7 @@ class DremioAIAgentBedrock:
             
             if not table_name:
                 # Search for relevant tables
-                tables = self.dremio_client.list_tables()
+                tables = self._normalize_table_names(self.dremio_client.list_tables())
                 relevant_tables = self._filter_tables_by_keywords(tables, question)
                 
                 if relevant_tables:
@@ -247,7 +272,7 @@ class DremioAIAgentBedrock:
         """Handle general queries"""
         try:
             # Try to find relevant tables
-            tables = self.dremio_client.list_tables()
+            tables = self._normalize_table_names(self.dremio_client.list_tables())
             relevant_tables = self._filter_tables_by_keywords(tables, question)
             
             if relevant_tables:
@@ -262,7 +287,7 @@ class DremioAIAgentBedrock:
         """Generate SQL using OpenAI"""
         try:
             # Get available tables and their schemas
-            tables = self.dremio_client.list_tables()
+            tables = self._normalize_table_names(self.dremio_client.list_tables())
             table_info = []
             
             for table in tables[:10]:  # Limit to first 10 tables
@@ -318,7 +343,7 @@ SQL Query:"""
         """Generate SQL using AWS Bedrock"""
         try:
             # Get available tables and their schemas
-            tables = self.dremio_client.list_tables()
+            tables = self._normalize_table_names(self.dremio_client.list_tables())
             table_info = []
             
             for table in tables[:10]:  # Limit to first 10 tables
@@ -422,7 +447,7 @@ Generate SQL Query:"""
         """Get relevant wiki context for the question"""
         try:
             # Search for relevant tables
-            tables = self.dremio_client.list_tables()
+            tables = self._normalize_table_names(self.dremio_client.list_tables())
             relevant_tables = self._filter_tables_by_keywords(tables, question)
             
             wiki_context = ""
@@ -456,8 +481,10 @@ Generate SQL Query:"""
         
         return sql_query
     
-    def _filter_tables_by_keywords(self, tables: List[str], question: str) -> List[str]:
+    def _filter_tables_by_keywords(self, tables: List[Any], question: str) -> List[str]:
         """Filter tables based on keywords in the question"""
+        # Ensure tables are strings
+        tables = self._normalize_table_names(tables)
         question_lower = question.lower()
         keywords = question_lower.split()
         
@@ -493,7 +520,7 @@ Generate SQL Query:"""
         if match:
             table_name = match.group(1)
             # Try to find the full qualified name
-            tables = self.dremio_client.list_tables()
+            tables = self._normalize_table_names(self.dremio_client.list_tables())
             for table in tables:
                 if table.endswith(f'.{table_name}') or table_name in table:
                     return table
@@ -502,7 +529,7 @@ Generate SQL Query:"""
     
     def _find_best_table_for_query(self, question: str) -> Optional[str]:
         """Find the best table for a query"""
-        tables = self.dremio_client.list_tables()
+        tables = self._normalize_table_names(self.dremio_client.list_tables())
         question_lower = question.lower()
         
         # Look for exact matches first
