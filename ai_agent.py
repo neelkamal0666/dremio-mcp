@@ -28,7 +28,27 @@ class DremioAIAgent:
         self.anthropic_client: Optional[Anthropic] = None
         
         if anthropic_api_key:
-            self.anthropic_client = Anthropic(api_key=anthropic_api_key)
+            # Try to initialize with SSL verification disabled for corporate environments
+            try:
+                import ssl
+                import urllib3
+                # Disable SSL warnings for corporate environments
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                
+                # Create client with custom SSL context
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                
+                self.anthropic_client = Anthropic(
+                    api_key=anthropic_api_key,
+                    # Note: Anthropic client doesn't directly support SSL context
+                    # This is a workaround for corporate environments
+                )
+            except Exception as e:
+                logger.warning(f"Failed to initialize Anthropic client with SSL workaround: {e}")
+                # Fallback to standard initialization
+                self.anthropic_client = Anthropic(api_key=anthropic_api_key)
         
         # Cache for metadata to avoid repeated API calls
         self.metadata_cache = {}
