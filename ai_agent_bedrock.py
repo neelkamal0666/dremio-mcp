@@ -293,7 +293,7 @@ class DremioAIAgentBedrock:
             for table in tables[:10]:  # Limit to first 10 tables
                 try:
                     schema = self.dremio_client.get_table_schema(table)
-                    if schema:
+                    if schema is not None and not schema.empty:
                         columns = [col['column_name'] for col in schema]
                         table_info.append(f"{table}: {', '.join(columns)}")
                 except Exception as e:
@@ -349,7 +349,7 @@ SQL Query:"""
             for table in tables[:10]:  # Limit to first 10 tables
                 try:
                     schema = self.dremio_client.get_table_schema(table)
-                    if schema:
+                    if schema is not None and not schema.empty:
                         columns = [col['column_name'] for col in schema]
                         table_info.append(f"{table}: {', '.join(columns)}")
                 except Exception as e:
@@ -380,10 +380,9 @@ Generate SQL Query:"""
             # Prepare Bedrock request
             body = {
                 "anthropic_version": "bedrock-2023-05-31",
-                "model": self.bedrock_model_id,
-                "system": system_prompt,
                 "max_tokens": 500,
                 "temperature": 0.1,
+                "system": system_prompt,
                 "messages": [
                     {
                         "role": "user",
@@ -620,7 +619,6 @@ Provide a clear, concise explanation of what this query will return."""
         try:
             body = {
                 "anthropic_version": "bedrock-2023-05-31",
-                "model": self.bedrock_model_id,
                 "max_tokens": 300,
                 "temperature": 0.3,
                 "messages": [
