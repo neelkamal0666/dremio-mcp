@@ -133,6 +133,7 @@ class DremioAIAgentBedrock:
             # Analyze query intent
             intent = self._analyze_query_intent(question)
             logger.info(f"Query intent: {intent}")
+            logger.info(f"Using structured method for intent: {intent}")
             
             if intent == 'table_exploration':
                 return self._handle_table_exploration_structured(question)
@@ -242,9 +243,9 @@ class DremioAIAgentBedrock:
             result = f"Metadata for table '{table_name}':\n"
             result += f"Columns ({len(schema) if schema else 0}):\n"
             
-            if schema:
-                for col in schema:
-                    result += f"- {col['column_name']}: {col['data_type']}\n"
+            if schema is not None and not schema.empty:
+                for _, row in schema.iterrows():
+                    result += f"- {row['column_name']}: {row['data_type']}\n"
             
             if wiki_description:
                 result += f"\nDescription:\n{wiki_description[:200]}..."
@@ -294,6 +295,7 @@ class DremioAIAgentBedrock:
     
     def _handle_data_query_structured(self, question: str) -> Dict[str, Any]:
         """Handle data queries and return structured response"""
+        logger.info("Using _handle_data_query_structured method")
         try:
             # Try AI-generated SQL first
             sql_query = None
