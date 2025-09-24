@@ -8,11 +8,13 @@ import asyncio
 import json
 import logging
 import os
+import warnings
 from typing import Any, Dict, List, Optional, Sequence
 from urllib.parse import urljoin
 
 import pandas as pd
 import requests
+import urllib3
 from mcp.server import Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
@@ -32,6 +34,10 @@ from dotenv import load_dotenv
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Suppress SSL warnings when verification is disabled
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
 # Ensure .env is loaded so env-based config is respected when this module is imported directly
 load_dotenv()

@@ -262,7 +262,7 @@ def mcp_json_tables(host, port, ssl, verify, cert_path, username, password):
         sys.exit(1)
 
 @mcp_json.command("ask")
-@click.option('--question', '-q', default=os.getenv('MCP_QUESTION', ''), help='Natural language question (defaults to MCP_QUESTION env if not provided)')
+@click.option('--question', '-q', default=None, help='Natural language question (will prompt if not provided)')
 @click.option('--host', default=os.getenv('DREMIO_HOST', 'localhost'), help='Dremio host')
 @click.option('--port', default=int(os.getenv('DREMIO_PORT', '9047')), help='Dremio REST port')
 @click.option('--ssl/--no-ssl', default=os.getenv('DREMIO_USE_SSL', 'true').lower() == 'true', help='Use SSL for REST')
@@ -272,10 +272,14 @@ def mcp_json_tables(host, port, ssl, verify, cert_path, username, password):
 @click.option('--password', default=os.getenv('DREMIO_PASSWORD', ''), help='Dremio password')
 def mcp_json_ask(question: str, host, port, ssl, verify, cert_path, username, password):
     """Ask a natural language question via JSON MCP server"""
-    # Allow question from environment if not provided via flag
+    # Get question from environment, flag, or prompt user
     if not question:
-        click.echo("❌ Question is required. Provide --question or set MCP_QUESTION in .env")
-        sys.exit(1)
+        question = os.getenv('MCP_QUESTION', '')
+        if not question:
+            question = click.prompt('Enter your question', type=str).strip()
+            if not question:
+                click.echo("❌ Question cannot be empty")
+                sys.exit(1)
     
     # Set environment variables BEFORE creating server instance
     os.environ['DREMIO_HOST'] = str(host)
