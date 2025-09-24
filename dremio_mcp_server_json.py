@@ -27,10 +27,14 @@ from mcp.types import (
 from pydantic import BaseModel
 from dremio_client import DremioClient
 from ai_agent_bedrock import DremioAIAgentBedrock
+from dotenv import load_dotenv
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Ensure .env is loaded so env-based config is respected when this module is imported directly
+load_dotenv()
 
 class DremioConfig(BaseModel):
     """Configuration for Dremio connection"""
@@ -59,7 +63,7 @@ class DremioMCPServerJSON:
         
     def _load_config(self) -> DremioConfig:
         """Load configuration from environment variables"""
-        return DremioConfig(
+        cfg = DremioConfig(
             host=os.getenv("DREMIO_HOST", "localhost"),
             port=int(os.getenv("DREMIO_PORT", "9047")),
             username=os.getenv("DREMIO_USERNAME", ""),
@@ -73,6 +77,10 @@ class DremioMCPServerJSON:
             default_source=os.getenv("DREMIO_DEFAULT_SOURCE"),
             default_schema=os.getenv("DREMIO_DEFAULT_SCHEMA"),
         )
+        logger.info(
+            f"MCP JSON using Dremio host={cfg.host}, port={cfg.port}, ssl={'on' if cfg.use_ssl else 'off'}, verify={'on' if cfg.verify_ssl else 'off'}"
+        )
+        return cfg
     
     def _create_client(self) -> DremioClient:
         """Create Dremio client"""
