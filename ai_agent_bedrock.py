@@ -127,6 +127,30 @@ class DremioAIAgentBedrock:
             logger.error(f"Error processing query: {e}")
             return f"Error processing query: {str(e)}"
     
+    def process_query_structured(self, question: str) -> Dict[str, Any]:
+        """Process natural language query and return structured response"""
+        try:
+            # Analyze query intent
+            intent = self._analyze_query_intent(question)
+            logger.info(f"Query intent: {intent}")
+            
+            if intent == 'table_exploration':
+                return self._handle_table_exploration_structured(question)
+            elif intent == 'metadata_request':
+                return self._handle_metadata_request_structured(question)
+            elif intent == 'data_query':
+                return self._handle_data_query_structured(question)
+            else:
+                return self._handle_general_query_structured(question)
+                
+        except Exception as e:
+            logger.error(f"Error processing query: {e}")
+            return {
+                "message": f"Error processing query: {str(e)}",
+                "error": str(e),
+                "success": False
+            }
+    
     def _analyze_query_intent(self, question: str) -> str:
         """Analyze query intent using pattern matching"""
         question_lower = question.lower()
@@ -268,6 +292,61 @@ class DremioAIAgentBedrock:
         except Exception as e:
             return f"Error executing data query: {str(e)}"
     
+    def _handle_data_query_structured(self, question: str) -> Dict[str, Any]:
+        """Handle data queries and return structured response"""
+        try:
+            # Try AI-generated SQL first
+            sql_query = None
+            if self.provider == "openai" and self.openai_client:
+                try:
+                    sql_query = self._generate_sql_with_openai(question)
+                    logger.info(f"OpenAI generated SQL: {sql_query}")
+                except Exception as e:
+                    logger.warning(f"OpenAI SQL generation failed: {e}")
+            elif self.provider == "bedrock" and self.bedrock_client:
+                try:
+                    sql_query = self._generate_sql_with_bedrock(question)
+                    logger.info(f"Bedrock generated SQL: {sql_query}")
+                except Exception as e:
+                    logger.warning(f"Bedrock SQL generation failed: {e}")
+            
+            # Fallback to heuristic SQL generation
+            if not sql_query:
+                sql_query = self._generate_sql_heuristic(question)
+                logger.info(f"Heuristic SQL: {sql_query}")
+            
+            if not sql_query:
+                return {
+                    "message": "Could not generate SQL query from your question. Please try being more specific about the table and columns you want to query.",
+                    "success": False,
+                    "error": "SQL generation failed"
+                }
+            
+            # Execute query
+            results = self.dremio_client.execute_query(sql_query)
+            
+            if results is None or results.empty:
+                return {
+                    "message": "No data found for your query.",
+                    "row_count": 0,
+                    "rows": [],
+                    "columns": [],
+                    "success": True
+                }
+            
+            # Format results as structured data
+            structured_results = self._format_query_results_structured(results, question)
+            structured_results["sql_query"] = sql_query
+            structured_results["success"] = True
+            return structured_results
+            
+        except Exception as e:
+            return {
+                "message": f"Error executing data query: {str(e)}",
+                "success": False,
+                "error": str(e)
+            }
+    
     def _handle_general_query(self, question: str) -> str:
         """Handle general queries"""
         try:
@@ -283,6 +362,97 @@ class DremioAIAgentBedrock:
         except Exception as e:
             return f"Error processing general query: {str(e)}"
     
+    def _handle_table_exploration_structured(self, question: str) -> Dict[str, Any]:
+        """Handle table exploration queries and return structured response"""
+        try:
+            tables_raw = self.dremio_client.list_tables()
+            tables = self._normalize_table_names(tables_raw)
+            
+            # Filter tables based on question keywords
+            filtered_tables = self._filter_tables_by_keywords(tables, question)
+            
+            return {
+                "message": f"Found {len(filtered_tables)} tables matching your query" if filtered_tables else f"Found {len(tables)} total tables",
+                "tables": filtered_tables[:10] if filtered_tables else tables[:10],
+                "total_count": len(filtered_tables) if filtered_tables else len(tables),
+                "success": True
+            }
+                
+        except Exception as e:
+            return {
+                "message": f"Error exploring tables: {str(e)}",
+                "success": False,
+                "error": str(e)
+            }
+    
+    def _handle_metadata_request_structured(self, question: str) -> Dict[str, Any]:
+        """Handle metadata requests and return structured response"""
+        try:
+            # Extract table name from question
+            table_name = self._extract_table_name_from_question(question)
+            
+            if not table_name:
+                # Search for relevant tables
+                tables = self._normalize_table_names(self.dremio_client.list_tables())
+                relevant_tables = self._filter_tables_by_keywords(tables, question)
+                
+                return {
+                    "message": "Please specify which table you want metadata for.",
+                    "relevant_tables": relevant_tables[:5] if relevant_tables else [],
+                    "success": False,
+                    "error": "No table specified"
+                }
+            
+            # Get table metadata
+            schema = self.dremio_client.get_table_schema(table_name)
+            wiki_description = None
+            
+            try:
+                wiki_description = self.dremio_client.get_wiki_description(table_name)
+            except Exception as e:
+                logger.warning(f"Could not get wiki description: {e}")
+            
+            schema_data = []
+            if schema is not None and not schema.empty:
+                schema_data = [{"column_name": row['column_name'], "data_type": row['data_type']} 
+                              for _, row in schema.iterrows()]
+            
+            return {
+                "message": f"Metadata for table '{table_name}'",
+                "table_name": table_name,
+                "columns": schema_data,
+                "column_count": len(schema_data),
+                "wiki_description": wiki_description[:200] + "..." if wiki_description else None,
+                "success": True
+            }
+            
+        except Exception as e:
+            return {
+                "message": f"Error getting metadata: {str(e)}",
+                "success": False,
+                "error": str(e)
+            }
+    
+    def _handle_general_query_structured(self, question: str) -> Dict[str, Any]:
+        """Handle general queries and return structured response"""
+        try:
+            # Try to find relevant tables
+            tables = self._normalize_table_names(self.dremio_client.list_tables())
+            relevant_tables = self._filter_tables_by_keywords(tables, question)
+            
+            return {
+                "message": "I found some relevant tables. Please be more specific about what you want to do with the data." if relevant_tables else "I found some tables. Please be more specific about what you want to do with the data.",
+                "relevant_tables": relevant_tables[:5] if relevant_tables else [],
+                "success": True
+            }
+                
+        except Exception as e:
+            return {
+                "message": f"Error processing general query: {str(e)}",
+                "success": False,
+                "error": str(e)
+            }
+    
     def _generate_sql_with_openai(self, question: str) -> Optional[str]:
         """Generate SQL using OpenAI"""
         try:
@@ -294,7 +464,7 @@ class DremioAIAgentBedrock:
                 try:
                     schema = self.dremio_client.get_table_schema(table)
                     if schema is not None and not schema.empty:
-                        columns = [col['column_name'] for col in schema]
+                        columns = [row['column_name'] for _, row in schema.iterrows()]
                         table_info.append(f"{table}: {', '.join(columns)}")
                 except Exception as e:
                     logger.warning(f"Could not get schema for {table}: {e}")
@@ -350,7 +520,7 @@ SQL Query:"""
                 try:
                     schema = self.dremio_client.get_table_schema(table)
                     if schema is not None and not schema.empty:
-                        columns = [col['column_name'] for col in schema]
+                        columns = [row['column_name'] for _, row in schema.iterrows()]
                         table_info.append(f"{table}: {', '.join(columns)}")
                 except Exception as e:
                     logger.warning(f"Could not get schema for {table}: {e}")
@@ -578,6 +748,60 @@ Generate SQL Query:"""
             
         except Exception as e:
             return f"Error formatting results: {str(e)}"
+    
+    def _format_query_results_structured(self, results: pd.DataFrame, question: str) -> Dict[str, Any]:
+        """Format query results as structured data for JSON response"""
+        try:
+            if results is None or results.empty:
+                return {
+                    "message": "No data found for your query.",
+                    "row_count": 0,
+                    "rows": [],
+                    "columns": []
+                }
+            
+            # Check if this is a count query
+            is_count_query = any(word in question.lower() for word in ['how many', 'count', 'number of'])
+            
+            if is_count_query and len(results) == 1:
+                # Extract count value
+                if 'total_count' in results.columns:
+                    count_value = results.iloc[0]['total_count']
+                    return {
+                        "message": f"Total count: {count_value}",
+                        "row_count": 1,
+                        "count_value": count_value,
+                        "is_count_query": True
+                    }
+                elif len(results.columns) == 1:
+                    count_value = results.iloc[0, 0]
+                    return {
+                        "message": f"Total count: {count_value}",
+                        "row_count": 1,
+                        "count_value": count_value,
+                        "is_count_query": True
+                    }
+            
+            # Convert DataFrame to structured format
+            rows = results.to_dict('records')
+            columns = list(results.columns)
+            
+            return {
+                "message": f"Query successful! Found {len(results)} rows.",
+                "row_count": len(results),
+                "rows": rows,
+                "columns": columns,
+                "is_count_query": False
+            }
+            
+        except Exception as e:
+            return {
+                "message": f"Error formatting results: {str(e)}",
+                "row_count": 0,
+                "rows": [],
+                "columns": [],
+                "error": str(e)
+            }
     
     def explain_query(self, sql_query: str) -> str:
         """Explain what a SQL query does"""

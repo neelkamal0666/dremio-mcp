@@ -593,15 +593,14 @@ class DremioMCPServerJSON:
         
         try:
             if self.ai_agent:
-                # Use AI agent for natural language processing
-                response = self.ai_agent.process_query(question)
+                # Use AI agent for natural language processing with structured response
+                response = self.ai_agent.process_query_structured(question)
                 return {
-                    "success": True,
+                    "success": response.get("success", True),
                     "query_type": "natural_language_query",
                     "data": {
                         "question": question,
-                        "response": response,
-                        "message": "Natural language query processed with AI"
+                        **response
                     }
                 }
             else:
